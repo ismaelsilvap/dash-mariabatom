@@ -224,6 +224,14 @@
   }
   .btn-primary:hover { opacity: 0.85; }
 
+  /* EDITOR DE TAXAS */
+  .taxas-canal { background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius-sm); padding: 14px 16px; margin-bottom: 10px; }
+  .taxas-canal-nome { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .taxas-fields { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+  .taxas-field label { font-size: 10px; color: var(--text3); display: block; margin-bottom: 3px; }
+  .taxas-field input { width: 100%; background: var(--bg); border: 1px solid var(--border2); border-radius: 6px; padding: 5px 8px; color: var(--text); font-size: 12px; font-family: var(--font-data); }
+  .taxas-field input:focus { outline: none; border-color: var(--accent); }
+
   /* EMPTY */
   .empty { padding: 32px; text-align: center; color: var(--text3); font-size: 13px; }
 </style>
@@ -365,6 +373,13 @@
           → Executar como: <strong style="color:var(--text2)">Eu</strong> → Quem pode acessar: <strong style="color:var(--text2)">Qualquer pessoa</strong><br>
           → Implantar → copie a URL gerada e cole aqui.
         </div>
+
+        <div style="margin-top:28px">
+          <div class="card-title" style="margin-bottom:4px">Taxas por Canal de Venda</div>
+          <div class="card-sub" style="margin-bottom:16px">Edite os valores e clique em Salvar Taxas. Os cálculos de lucro atualizam automaticamente.</div>
+          <div id="taxas-editor"></div>
+          <button class="btn-primary" style="margin-top:12px" onclick="salvarTaxas()">Salvar Taxas</button>
+        </div>
       </div>
     </div>
 
@@ -387,6 +402,27 @@ const CANAL_CORES = {
   'TikTok Shop':          '#F59E0B',
   'Nummus Cashback':      '#10B981',
 };
+
+// Taxas por canal — editáveis pelo painel de Configurações
+const TAXAS_DEFAULT = {
+  'Loja Física':           { percentual: 10, frete: 0,  imposto: 0,  embalagem: 0, taxaItem: 0 },
+  'Nummus Cashback':       { percentual: 10, frete: 0,  imposto: 0,  embalagem: 0, taxaItem: 0 },
+  'TikTok Shop':           { percentual: 10, frete: 6,  imposto: 6,  embalagem: 2, taxaItem: 4 },
+  'Ecommerce (Nuvemshop)': { percentual: 5,  frete: 0,  imposto: 6,  embalagem: 0, taxaItem: 0 },
+};
+
+function getTaxas() {
+  return cfg.taxas || TAXAS_DEFAULT;
+}
+
+// Calcula o custo total de taxas de um item de pedido
+function calcularTaxas(canal, valorTotal, quantidade) {
+  const taxas = getTaxas();
+  const t = taxas[canal] || { percentual: 0, frete: 0, imposto: 0, embalagem: 0, taxaItem: 0 };
+  const pct = ((t.percentual || 0) + (t.frete || 0) + (t.imposto || 0)) / 100;
+  const fixo = ((t.embalagem || 0) + (t.taxaItem || 0)) * (quantidade || 1);
+  return (valorTotal * pct) + fixo;
+}
 
 // ── NAVEGAÇÃO ────────────────────────────────────────────
 function showPage(name) {
@@ -513,18 +549,18 @@ const fmtN = v => (v||0).toLocaleString('pt-BR');
 function renderDashboard() {
   const dados = filtrarPorPeriodo(allPedidos);
 
-  // ── KPIs
   const faturamento = dados.reduce((s,r) => s + r.valorTotal, 0);
   const custo       = dados.reduce((s,r) => s + r.custoTotal, 0);
-  const lucro       = faturamento - custo;
+  const totalTaxas  = dados.reduce((s,r) => s + calcularTaxas(r.canal, r.valorTotal, r.quantidade), 0);
+  const lucro       = faturamento - custo - totalTaxas;
   const margem      = faturamento > 0 ? lucro / faturamento : 0;
   const pedidos     = new Set(dados.map(r => r.numeroPedido)).size;
 
   const kpis = [
-    { label:'Faturamento Bruto', value: fmt(faturamento), sub: `${fmtN(pedidos)} pedidos`, color:'var(--cyan)' },
-    { label:'Custo Total (CMV)', value: fmt(custo), sub: faturamento > 0 ? `${fmtPct(custo/faturamento)} do faturamento` : '—', color:'var(--amber)' },
-    { label:'Lucro Real', value: fmt(lucro), sub: lucro >= 0 ? '▲ positivo' : '▼ negativo', color: lucro >= 0 ? 'var(--green)' : 'var(--red)' },
-    { label:'Margem Real', value: fmtPct(margem), sub: 'sobre faturamento bruto', color:'var(--accent)' },
+    { label:'Faturamento Bruto',  value: fmt(faturamento), sub: `${fmtN(pedidos)} pedidos`, color:'var(--cyan)' },
+    { label:'Custo Total (CMV)',   value: fmt(custo),       sub: faturamento > 0 ? `${fmtPct(custo/faturamento)} do faturamento` : '—', color:'var(--amber)' },
+    { label:'Impostos e Taxas',    value: fmt(totalTaxas),  sub: faturamento > 0 ? `${fmtPct(totalTaxas/faturamento)} do faturamento` : '—', color:'var(--red)' },
+    { label:'Lucro Real',          value: fmt(lucro),       sub: `Margem: ${fmtPct(margem)}`, color: lucro >= 0 ? 'var(--green)' : 'var(--red)' },
   ];
 
   document.getElementById('kpi-grid').innerHTML = kpis.map(k => `
@@ -651,29 +687,32 @@ function renderTabelaCanais(dados) {
   const mapa = {};
   dados.forEach(r => {
     if (!r.canal) return;
-    if (!mapa[r.canal]) mapa[r.canal] = { fat: 0, custo: 0 };
+    if (!mapa[r.canal]) mapa[r.canal] = { fat: 0, custo: 0, taxas: 0 };
     mapa[r.canal].fat   += r.valorTotal;
     mapa[r.canal].custo += r.custoTotal;
+    mapa[r.canal].taxas += calcularTaxas(r.canal, r.valorTotal, r.quantidade);
   });
   const canais = Object.keys(mapa).sort((a,b) => mapa[b].fat - mapa[a].fat);
   const totalFat = canais.reduce((s,c) => s + mapa[c].fat, 0);
 
-  if (!canais.length) { document.getElementById('channels-table').innerHTML = '<tr><td colspan="4"><div class="empty">Sem dados</div></td></tr>'; return; }
+  if (!canais.length) { document.getElementById('channels-table').innerHTML = '<tr><td colspan="5"><div class="empty">Sem dados</div></td></tr>'; return; }
 
   document.getElementById('channels-table').innerHTML = `
     <thead><tr>
-      <th>Canal</th><th>Faturamento</th><th>Custo</th><th>Margem</th>
+      <th>Canal</th><th>Faturamento</th><th>Custo</th><th>Taxas</th><th>Margem</th>
     </tr></thead>
     <tbody>
     ${canais.map(c => {
       const d = mapa[c];
-      const margem = d.fat > 0 ? (d.fat - d.custo) / d.fat : 0;
+      const lucroCanal = d.fat - d.custo - d.taxas;
+      const margem = d.fat > 0 ? lucroCanal / d.fat : 0;
       const cor = CANAL_CORES[c] || '#475569';
       const barW = Math.max(4, Math.round((d.fat / totalFat) * 80));
       return `<tr>
         <td><div class="channel-name"><div class="channel-dot" style="background:${cor}"></div>${c}</div></td>
         <td>${fmt(d.fat)}</td>
         <td style="color:var(--amber)">${fmt(d.custo)}</td>
+        <td style="color:var(--red)">${fmt(d.taxas)}</td>
         <td><div class="margin-bar-wrap"><div class="margin-bar" style="width:${barW}px;background:${cor}"></div><span style="color:${margem>0.2?'var(--green)':margem>0.1?'var(--amber)':'var(--red)'}">${fmtPct(margem)}</span></div></td>
       </tr>`;
     }).join('')}
@@ -705,20 +744,31 @@ function renderTopProdutos(dados) {
 
 // ── RENDER CONTAS ────────────────────────────────────────
 function renderContas() {
+  const el = document.getElementById('contas-list');
   if (!allContas.length) {
-    document.getElementById('contas-list').innerHTML = '<div class="empty">Nenhuma conta a pagar carregada.</div>';
+    el.innerHTML = '<div class="empty">Nenhuma conta a pagar carregada.<br>Rode "Sincronizar agora" no Apps Script.</div>';
     return;
   }
   const hoje = new Date(); hoje.setHours(0,0,0,0);
   const sorted = [...allContas].sort((a,b) => new Date(a.vencimento) - new Date(b.vencimento));
 
-  document.getElementById('contas-list').innerHTML = sorted.map(c => {
+  el.innerHTML = sorted.map(c => {
     const venc = new Date(c.vencimento);
-    const vencStr = isNaN(venc) ? c.vencimento : venc.toLocaleDateString('pt-BR');
-    const sit = (c.situacao || '').toLowerCase();
-    let statusClass = 'status-pendente', statusLabel = 'Pendente';
-    if (sit.includes('pago') || sit.includes('1')) { statusClass = 'status-pago'; statusLabel = 'Pago'; }
-    else if (!isNaN(venc) && venc < hoje) { statusClass = 'status-atrasado'; statusLabel = 'Atrasado'; }
+    const vencStr = isNaN(venc) ? (c.vencimento || '—') : venc.toLocaleDateString('pt-BR');
+    const sit = String(c.situacao || '').toLowerCase();
+
+    let statusClass, statusLabel;
+    if (sit.includes('paga') || sit.includes('pago') || sit === '2') {
+      statusClass = 'status-pago'; statusLabel = 'Paga';
+    } else if (sit.includes('cancelad')) {
+      statusClass = 'status-pendente'; statusLabel = 'Cancelada';
+    } else if (!isNaN(venc) && venc < hoje) {
+      statusClass = 'status-atrasado'; statusLabel = 'Atrasada';
+    } else {
+      statusClass = 'status-pendente'; statusLabel = c.situacao || 'Em aberto';
+    }
+
+    const corValor = statusClass === 'status-pago' ? 'var(--green)' : statusClass === 'status-atrasado' ? 'var(--red)' : 'var(--amber)';
     return `
       <div class="conta-row">
         <div class="conta-info">
@@ -726,8 +776,8 @@ function renderContas() {
           <div class="conta-desc">${c.descricao || ''}</div>
         </div>
         <div class="conta-right">
-          <div class="conta-valor" style="color:${statusClass==='status-pago'?'var(--green)':statusClass==='status-atrasado'?'var(--red)':'var(--amber)'}">${fmt(c.valor)}</div>
-          <div class="conta-venc">${vencStr}</div>
+          <div class="conta-valor" style="color:${corValor}">${fmt(c.valor)}</div>
+          <div class="conta-venc">Vence: ${vencStr}</div>
         </div>
         <div><span class="status-badge ${statusClass}">${statusLabel}</span></div>
       </div>`;
@@ -736,7 +786,7 @@ function renderContas() {
 
 // ── CONFIG ───────────────────────────────────────────────
 function salvarConfig() {
-  cfg = { apiUrl: document.getElementById('cfg-api').value.trim() };
+  cfg = { ...cfg, apiUrl: document.getElementById('cfg-api').value.trim() };
   localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
   carregarDados();
   showPage('overview');
@@ -744,6 +794,68 @@ function salvarConfig() {
 
 function carregarInputsConfig() {
   if (cfg.apiUrl) document.getElementById('cfg-api').value = cfg.apiUrl;
+  renderTaxasEditor();
+}
+
+function renderTaxasEditor() {
+  const taxas = getTaxas();
+  const canais = Object.keys(TAXAS_DEFAULT);
+  document.getElementById('taxas-editor').innerHTML = canais.map(canal => {
+    const t = taxas[canal] || TAXAS_DEFAULT[canal];
+    const cor = CANAL_CORES[canal] || '#475569';
+    const id = canal.replace(/[^a-z0-9]/gi, '_');
+    return `
+      <div class="taxas-canal">
+        <div class="taxas-canal-nome">
+          <div class="channel-dot" style="background:${cor}"></div>${canal}
+        </div>
+        <div class="taxas-fields">
+          <div class="taxas-field">
+            <label>Comissão %</label>
+            <input type="number" id="tx_${id}_percentual" value="${t.percentual}" min="0" max="100" step="0.1">
+          </div>
+          <div class="taxas-field">
+            <label>Frete %</label>
+            <input type="number" id="tx_${id}_frete" value="${t.frete}" min="0" max="100" step="0.1">
+          </div>
+          <div class="taxas-field">
+            <label>Imposto %</label>
+            <input type="number" id="tx_${id}_imposto" value="${t.imposto}" min="0" max="100" step="0.1">
+          </div>
+          <div class="taxas-field">
+            <label>Embalagem R$</label>
+            <input type="number" id="tx_${id}_embalagem" value="${t.embalagem}" min="0" step="0.01">
+          </div>
+          <div class="taxas-field">
+            <label>Taxa/item R$</label>
+            <input type="number" id="tx_${id}_taxaItem" value="${t.taxaItem}" min="0" step="0.01">
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function salvarTaxas() {
+  const canais = Object.keys(TAXAS_DEFAULT);
+  const novasTaxas = {};
+  canais.forEach(canal => {
+    const id = canal.replace(/[^a-z0-9]/gi, '_');
+    novasTaxas[canal] = {
+      percentual: parseFloat(document.getElementById(`tx_${id}_percentual`).value) || 0,
+      frete:      parseFloat(document.getElementById(`tx_${id}_frete`).value) || 0,
+      imposto:    parseFloat(document.getElementById(`tx_${id}_imposto`).value) || 0,
+      embalagem:  parseFloat(document.getElementById(`tx_${id}_embalagem`).value) || 0,
+      taxaItem:   parseFloat(document.getElementById(`tx_${id}_taxaItem`).value) || 0,
+    };
+  });
+  cfg = { ...cfg, taxas: novasTaxas };
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+  renderDashboard();
+  // Feedback visual
+  const btn = event.target;
+  const orig = btn.textContent;
+  btn.textContent = '✓ Salvo!'; btn.style.background = 'var(--green)';
+  setTimeout(() => { btn.textContent = orig; btn.style.background = ''; }, 2000);
 }
 
 // ── INIT ─────────────────────────────────────────────────
