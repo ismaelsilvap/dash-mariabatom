@@ -509,6 +509,7 @@ function normalizarConta(row) {
     vencimento: String(row['Vencimento'] || ''),
     valor:      parseFloat(row['Valor']) || 0,
     situacao:   String(row['Situação'] || ''),
+    // 'ID Contato (Bling)' é coluna interna — não usada no dashboard
   };
 }
 
