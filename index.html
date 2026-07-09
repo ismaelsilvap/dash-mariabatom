@@ -354,22 +354,16 @@
         <div class="card-header"><div><div class="card-title">Configuração da Fonte de Dados</div><div class="card-sub">Cole as URLs de publicação CSV das abas do Google Sheets</div></div></div>
         <div class="config-panel">
           <div>
-            <label>URL CSV — Pedidos_Vendas</label>
-            <input class="config-input" id="cfg-pedidos" placeholder="https://docs.google.com/spreadsheets/d/.../pub?gid=...&single=true&output=csv">
-          </div>
-          <div>
-            <label>URL CSV — Contas_a_Pagar</label>
-            <input class="config-input" id="cfg-contas" placeholder="https://docs.google.com/spreadsheets/d/.../pub?gid=...&single=true&output=csv">
-          </div>
-          <div>
-            <label>URL CSV — Config (última sincronização)</label>
-            <input class="config-input" id="cfg-config" placeholder="https://docs.google.com/spreadsheets/d/.../pub?gid=...&single=true&output=csv">
+            <label>URL do Apps Script (Web App)</label>
+            <input class="config-input" id="cfg-api" placeholder="https://script.google.com/macros/s/AKfy.../exec">
           </div>
           <button class="btn-primary" onclick="salvarConfig()">Salvar e carregar dados</button>
         </div>
-        <div style="margin-top:16px; font-size:12px; color:var(--text3); line-height:1.6">
-          <strong style="color:var(--text2)">Como publicar cada aba como CSV:</strong><br>
-          No Google Sheets → Arquivo → Publicar na web → selecione a aba → formato CSV → Publicar → copie a URL gerada.
+        <div style="margin-top:16px; font-size:12px; color:var(--text3); line-height:1.8">
+          <strong style="color:var(--text2)">Como obter a URL:</strong><br>
+          No Apps Script → Implantar → Nova implantação → Tipo: App da Web<br>
+          → Executar como: <strong style="color:var(--text2)">Eu</strong> → Quem pode acessar: <strong style="color:var(--text2)">Qualquer pessoa</strong><br>
+          → Implantar → copie a URL gerada e cole aqui.
         </div>
       </div>
     </div>
@@ -379,7 +373,7 @@
 
 <script>
 // ── CONFIG ──────────────────────────────────────────────
-const CONFIG_KEY = 'dash_config_v1';
+const CONFIG_KEY = 'dash_config_v2';
 let cfg = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}');
 let allPedidos = [];
 let allContas  = [];
@@ -471,23 +465,27 @@ function normalizarConta(row) {
   };
 }
 
-// ── FETCH CSV ────────────────────────────────────────────
-async function fetchCSV(url) {
-  if (!url) return [];
+// ── FETCH VIA APPS SCRIPT PROXY ──────────────────────────
+async function fetchAba(aba) {
+  if (!cfg.apiUrl) return [];
+  const url = cfg.apiUrl + (cfg.apiUrl.includes('?') ? '&' : '?') + 'aba=' + encodeURIComponent(aba);
   const res = await fetch(url);
-  if (!res.ok) throw new Error('Erro ao buscar CSV');
-  return parseCSV(await res.text());
+  if (!res.ok) throw new Error('Erro ao buscar aba ' + aba + ' (HTTP ' + res.status + ')');
+  const data = await res.json();
+  if (data && data.erro) throw new Error(data.erro);
+  return Array.isArray(data) ? data : [];
 }
 
 // ── CARREGAR DADOS ───────────────────────────────────────
 async function carregarDados() {
-  if (!cfg.pedidos) { return; }
+  if (!cfg.apiUrl) return;
   try {
     const [rawPedidos, rawContas, rawConfig] = await Promise.all([
-      fetchCSV(cfg.pedidos),
-      fetchCSV(cfg.contas),
-      fetchCSV(cfg.configUrl),
+      fetchAba('Pedidos_Vendas'),
+      fetchAba('Contas_a_Pagar'),
+      fetchAba('Config'),
     ]);
+
     allPedidos = rawPedidos.map(normalizarPedido).filter(r => r.valorTotal > 0);
     allContas  = rawContas.map(normalizarConta);
 
@@ -502,7 +500,7 @@ async function carregarDados() {
     renderDashboard();
     renderContas();
   } catch(e) {
-    document.getElementById('kpi-grid').innerHTML = `<div class="empty">Erro ao carregar dados.<br>Verifique as URLs na aba Configurações.<br><small style="color:var(--red)">${e.message}</small></div>`;
+    document.getElementById('kpi-grid').innerHTML = `<div class="empty" style="grid-column:1/-1">Erro ao carregar dados.<br>Verifique a URL na aba Configurações.<br><small style="color:var(--red)">${e.message}</small></div>`;
   }
 }
 
@@ -738,28 +736,22 @@ function renderContas() {
 
 // ── CONFIG ───────────────────────────────────────────────
 function salvarConfig() {
-  cfg = {
-    pedidos:   document.getElementById('cfg-pedidos').value.trim(),
-    contas:    document.getElementById('cfg-contas').value.trim(),
-    configUrl: document.getElementById('cfg-config').value.trim(),
-  };
+  cfg = { apiUrl: document.getElementById('cfg-api').value.trim() };
   localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
   carregarDados();
   showPage('overview');
 }
 
 function carregarInputsConfig() {
-  if (cfg.pedidos)    document.getElementById('cfg-pedidos').value  = cfg.pedidos;
-  if (cfg.contas)     document.getElementById('cfg-contas').value   = cfg.contas;
-  if (cfg.configUrl)  document.getElementById('cfg-config').value   = cfg.configUrl;
+  if (cfg.apiUrl) document.getElementById('cfg-api').value = cfg.apiUrl;
 }
 
 // ── INIT ─────────────────────────────────────────────────
 carregarInputsConfig();
-if (cfg.pedidos) {
+if (cfg.apiUrl) {
   carregarDados();
 } else {
-  document.getElementById('kpi-grid').innerHTML = '<div class="empty" style="grid-column:1/-1">Configure as URLs na aba <strong style="color:var(--accent)">Configurações</strong> para carregar os dados.</div>';
+  document.getElementById('kpi-grid').innerHTML = '<div class="empty" style="grid-column:1/-1">Configure a URL do Apps Script na aba <strong style="color:var(--accent)">Configurações</strong> para carregar os dados.</div>';
   showPage('config');
 }
 </script>
