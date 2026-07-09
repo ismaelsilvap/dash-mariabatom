@@ -107,6 +107,34 @@
   }
   .period-tab.active { background: var(--accent); color: #fff; }
 
+  /* FILTRO DE DATAS EXPANDIDO */
+  .filter-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  }
+  .filter-mode-tabs { display: flex; gap: 3px; background: var(--surface); border-radius: var(--radius-sm); padding: 3px; }
+  .filter-mode-tab {
+    font-size: 11px; font-weight: 600; padding: 5px 11px;
+    border-radius: 6px; border: none; cursor: pointer;
+    color: var(--text2); background: none; transition: all 0.15s; white-space: nowrap;
+  }
+  .filter-mode-tab.active { background: var(--accent); color: #fff; }
+  .filter-inputs { display: flex; align-items: center; gap: 6px; }
+  .filter-input {
+    background: var(--surface); border: 1px solid var(--border2);
+    border-radius: var(--radius-sm); padding: 5px 10px;
+    color: var(--text); font-size: 12px; font-family: var(--font-data);
+    cursor: pointer;
+  }
+  .filter-input:focus { outline: none; border-color: var(--accent); }
+  .filter-label { font-size: 11px; color: var(--text3); }
+  .filter-apply {
+    background: var(--accent); color: #fff; border: none;
+    border-radius: var(--radius-sm); padding: 5px 12px;
+    font-size: 12px; font-weight: 600; cursor: pointer; transition: opacity 0.15s;
+  }
+  .filter-apply:hover { opacity: 0.85; }
+  .filter-desc { font-size: 11px; color: var(--text3); font-style: italic; white-space: nowrap; }
+
   /* ── PULSE LINE ── */
   .pulse-bar {
     height: 3px; background: var(--border);
@@ -276,13 +304,40 @@
     <div class="topbar">
       <div>
         <div class="topbar-title" id="page-title">Dashboard</div>
+        <div class="filter-desc" id="filter-desc">Últimos 30 dias</div>
       </div>
       <div class="topbar-meta">
-        <div class="period-tabs">
-          <button class="period-tab active" onclick="setPeriod(7, this)">7d</button>
-          <button class="period-tab" onclick="setPeriod(30, this)">30d</button>
-          <button class="period-tab" onclick="setPeriod(90, this)">90d</button>
-          <button class="period-tab" onclick="setPeriod(0, this)">Tudo</button>
+        <div class="filter-bar">
+          <!-- Abas de modo -->
+          <div class="filter-mode-tabs">
+            <button class="filter-mode-tab" onclick="setModo('rapido')">Rápido</button>
+            <button class="filter-mode-tab" onclick="setModo('dia')">Dia</button>
+            <button class="filter-mode-tab" onclick="setModo('periodo')">Período</button>
+            <button class="filter-mode-tab" onclick="setModo('mes')">Mês</button>
+            <button class="filter-mode-tab active" onclick="setModo('rapido')">—</button>
+          </div>
+          <!-- Inputs por modo -->
+          <div class="filter-inputs" id="filter-inputs-rapido">
+            <button class="period-tab active" onclick="setRapido(7,this)">7d</button>
+            <button class="period-tab" onclick="setRapido(30,this)">30d</button>
+            <button class="period-tab" onclick="setRapido(90,this)">90d</button>
+            <button class="period-tab" onclick="setRapido(365,this)">1a</button>
+            <button class="period-tab" onclick="setRapido(0,this)">Tudo</button>
+          </div>
+          <div class="filter-inputs" id="filter-inputs-dia" style="display:none">
+            <input type="date" class="filter-input" id="fi-dia">
+            <button class="filter-apply" onclick="aplicarFiltro()">Aplicar</button>
+          </div>
+          <div class="filter-inputs" id="filter-inputs-periodo" style="display:none">
+            <input type="date" class="filter-input" id="fi-inicio">
+            <span class="filter-label">até</span>
+            <input type="date" class="filter-input" id="fi-fim">
+            <button class="filter-apply" onclick="aplicarFiltro()">Aplicar</button>
+          </div>
+          <div class="filter-inputs" id="filter-inputs-mes" style="display:none">
+            <input type="month" class="filter-input" id="fi-mes">
+            <button class="filter-apply" onclick="aplicarFiltro()">Aplicar</button>
+          </div>
         </div>
       </div>
     </div>
@@ -392,7 +447,6 @@ const CONFIG_KEY = 'dash_config_v2';
 let cfg = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}');
 let allPedidos = [];
 let allContas  = [];
-let periodoAtivo = 30;
 let chartEvolucao = null;
 let chartCanais   = null;
 
@@ -437,32 +491,121 @@ function showPage(name) {
   document.getElementById('page-title').textContent = titles[name];
 }
 
-// ── PERÍODO ──────────────────────────────────────────────
-function setPeriod(dias, btn) {
-  periodoAtivo = dias;
-  document.querySelectorAll('.period-tab').forEach(b => b.classList.remove('active'));
+// ── FILTRO DE DATAS ─────────────────────────────────────
+let filtro = { modo: 'rapido', dias: 30, inicio: null, fim: null };
+
+function isoHoje() {
+  return new Date().toISOString().substring(0,10);
+}
+
+function inicializarFiltro() {
+  document.getElementById('fi-dia').value     = isoHoje();
+  document.getElementById('fi-mes').value     = isoHoje().substring(0,7);
+  const fim = new Date();
+  const ini = new Date(); ini.setDate(fim.getDate() - 29);
+  document.getElementById('fi-inicio').value  = ini.toISOString().substring(0,10);
+  document.getElementById('fi-fim').value     = isoHoje();
+  // Inicializa as abas de modo
+  setModo('rapido', false);
+  // Aplica filtro padrão (30 dias) via botão ativo
+  document.querySelectorAll('#filter-inputs-rapido .period-tab').forEach((b,i) => {
+    if (i===1) { b.classList.add('active'); } else { b.classList.remove('active'); }
+  });
+}
+
+function setModo(modo, render=true) {
+  filtro.modo = modo;
+  ['rapido','dia','periodo','mes'].forEach(m => {
+    const el = document.getElementById('filter-inputs-' + m);
+    if (el) el.style.display = m === modo ? 'flex' : 'none';
+  });
+  // Atualiza destaque nas abas de modo
+  document.querySelectorAll('.filter-mode-tab').forEach((b,i) => {
+    const modos = ['rapido','dia','periodo','mes'];
+    b.classList.toggle('active', modos[i] === modo);
+    b.textContent = ['Rápido','Dia','Período','Mês'][i] || b.textContent;
+  });
+  // Remove a 5ª aba fantasma que criamos no HTML
+  const tabs = document.querySelectorAll('.filter-mode-tab');
+  if (tabs[4]) tabs[4].style.display = 'none';
+  if (render) aplicarFiltro();
+}
+
+function setRapido(dias, btn) {
+  filtro = { modo: 'rapido', dias };
+  document.querySelectorAll('#filter-inputs-rapido .period-tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
+  atualizarDesc();
   renderDashboard();
+  renderContas();
+}
+
+function aplicarFiltro() {
+  const modo = filtro.modo;
+  if (modo === 'dia') {
+    const d = document.getElementById('fi-dia').value;
+    filtro = { modo:'dia', inicio: d, fim: d };
+  } else if (modo === 'periodo') {
+    filtro = { modo:'periodo', inicio: document.getElementById('fi-inicio').value, fim: document.getElementById('fi-fim').value };
+  } else if (modo === 'mes') {
+    const m = document.getElementById('fi-mes').value; // "2026-07"
+    filtro = { modo:'mes', inicio: m + '-01', fim: ultimoDiaMes(m) };
+  }
+  atualizarDesc();
+  renderDashboard();
+  renderContas();
+}
+
+function ultimoDiaMes(mesStr) {
+  const [y, m] = mesStr.split('-').map(Number);
+  return new Date(y, m, 0).toISOString().substring(0,10);
+}
+
+function atualizarDesc() {
+  const el = document.getElementById('filter-desc');
+  if (!el) return;
+  const { modo, dias, inicio, fim } = filtro;
+  const fmtD = s => s ? new Date(s+'T12:00:00').toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric'}) : '';
+  if (modo === 'rapido') {
+    el.textContent = dias === 0 ? 'Todo o período' : `Últimos ${dias} dias`;
+  } else if (modo === 'dia') {
+    el.textContent = `Dia: ${fmtD(inicio)}`;
+  } else if (modo === 'periodo') {
+    el.textContent = `${fmtD(inicio)} até ${fmtD(fim)}`;
+  } else if (modo === 'mes') {
+    const [y, m] = (inicio||'').split('-');
+    const nomes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    el.textContent = `${nomes[parseInt(m)-1]}/${y}`;
+  }
 }
 
 function filtrarPorPeriodo(rows) {
-  if (!periodoAtivo) return rows;
-  const limite = new Date();
-  limite.setDate(limite.getDate() - periodoAtivo);
+  const { modo, dias, inicio, fim } = filtro;
+  if (modo === 'rapido' && dias === 0) return rows;
   return rows.filter(r => {
-    const d = new Date(r.data);
-    return !isNaN(d) && d >= limite;
+    const d = r.data ? r.data.substring(0,10) : '';
+    if (!d) return false;
+    if (modo === 'rapido') {
+      const limite = new Date(); limite.setDate(limite.getDate() - dias);
+      return new Date(d) >= limite;
+    }
+    return d >= inicio && d <= fim;
   });
 }
 
 function filtrarContasPorPeriodo(contas) {
-  if (!periodoAtivo) return contas;
-  const hoje = new Date();
-  const limite = new Date();
-  limite.setDate(hoje.getDate() - periodoAtivo);
+  const { modo, dias, inicio, fim } = filtro;
   return contas.filter(c => {
-    const d = new Date(c.vencimento);
-    return !isNaN(d) && d >= limite && d <= hoje;
+    const d = c.vencimento ? c.vencimento.substring(0,10) : '';
+    if (!d) return false;
+    if (modo === 'rapido') {
+      if (dias === 0) return true;
+      const hoje = new Date();
+      const limite = new Date(); limite.setDate(hoje.getDate() - dias);
+      const dataVenc = new Date(d);
+      return dataVenc >= limite && dataVenc <= hoje;
+    }
+    return d >= inicio && d <= fim;
   });
 }
 
@@ -604,7 +747,8 @@ function renderDashboard() {
 
 // ── EVOLUÇÃO (line chart) ────────────────────────────────
 function renderEvolucao(dados) {
-  const agrupa = periodoAtivo <= 30 ? 'dia' : 'semana';
+  const diasFiltro = filtro.modo === 'rapido' ? filtro.dias : (filtro.inicio && filtro.fim ? Math.round((new Date(filtro.fim) - new Date(filtro.inicio)) / 86400000) : 30);
+  const agrupa = diasFiltro <= 31 ? 'dia' : 'semana';
   const mapa = {};
   dados.forEach(r => {
     const d = new Date(r.data);
@@ -894,6 +1038,7 @@ function salvarTaxas() {
 
 // ── INIT ─────────────────────────────────────────────────
 carregarInputsConfig();
+inicializarFiltro();
 if (cfg.apiUrl) {
   carregarDados();
 } else {
