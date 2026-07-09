@@ -123,7 +123,7 @@
   .content { padding: 28px 32px; display: flex; flex-direction: column; gap: 24px; }
 
   /* KPI GRID */
-  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }
   .kpi-card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -455,6 +455,17 @@ function filtrarPorPeriodo(rows) {
   });
 }
 
+function filtrarContasPorPeriodo(contas) {
+  if (!periodoAtivo) return contas;
+  const hoje = new Date();
+  const limite = new Date();
+  limite.setDate(hoje.getDate() - periodoAtivo);
+  return contas.filter(c => {
+    const d = new Date(c.vencimento);
+    return !isNaN(d) && d >= limite && d <= hoje;
+  });
+}
+
 // ── CSV PARSER ───────────────────────────────────────────
 function parseCSV(text) {
   const lines = text.trim().split('\n');
@@ -493,11 +504,11 @@ function normalizarPedido(row) {
 
 function normalizarConta(row) {
   return {
-    fornecedor: row['Fornecedor'] || '',
-    descricao:  row['Descrição'] || '',
-    vencimento: row['Vencimento'] || '',
+    fornecedor: String(row['Fornecedor'] || ''),
+    descricao:  String(row['Descrição'] || ''),
+    vencimento: String(row['Vencimento'] || ''),
     valor:      parseFloat(row['Valor']) || 0,
-    situacao:   row['Situação'] || '',
+    situacao:   String(row['Situação'] || ''),
   };
 }
 
@@ -549,18 +560,25 @@ const fmtN = v => (v||0).toLocaleString('pt-BR');
 function renderDashboard() {
   const dados = filtrarPorPeriodo(allPedidos);
 
+  // Filtra contas a pagar pelo vencimento no mesmo período
+  const contasPeriodo = filtrarContasPorPeriodo(allContas);
+  const totalContas = contasPeriodo
+    .filter(c => !c.situacao.toLowerCase().includes('cancelad'))
+    .reduce((s, c) => s + c.valor, 0);
+
   const faturamento = dados.reduce((s,r) => s + r.valorTotal, 0);
   const custo       = dados.reduce((s,r) => s + r.custoTotal, 0);
   const totalTaxas  = dados.reduce((s,r) => s + calcularTaxas(r.canal, r.valorTotal, r.quantidade), 0);
-  const lucro       = faturamento - custo - totalTaxas;
+  const lucro       = faturamento - custo - totalTaxas - totalContas;
   const margem      = faturamento > 0 ? lucro / faturamento : 0;
   const pedidos     = new Set(dados.map(r => r.numeroPedido)).size;
 
   const kpis = [
-    { label:'Faturamento Bruto',  value: fmt(faturamento), sub: `${fmtN(pedidos)} pedidos`, color:'var(--cyan)' },
-    { label:'Custo Total (CMV)',   value: fmt(custo),       sub: faturamento > 0 ? `${fmtPct(custo/faturamento)} do faturamento` : '—', color:'var(--amber)' },
-    { label:'Impostos e Taxas',    value: fmt(totalTaxas),  sub: faturamento > 0 ? `${fmtPct(totalTaxas/faturamento)} do faturamento` : '—', color:'var(--red)' },
-    { label:'Lucro Real',          value: fmt(lucro),       sub: `Margem: ${fmtPct(margem)}`, color: lucro >= 0 ? 'var(--green)' : 'var(--red)' },
+    { label:'Faturamento Bruto',   value: fmt(faturamento), sub: `${fmtN(pedidos)} pedidos`, color:'var(--cyan)' },
+    { label:'Custo Total (CMV)',    value: fmt(custo),       sub: faturamento > 0 ? `${fmtPct(custo/faturamento)} do faturamento` : '—', color:'var(--amber)' },
+    { label:'Impostos e Taxas',     value: fmt(totalTaxas),  sub: faturamento > 0 ? `${fmtPct(totalTaxas/faturamento)} do faturamento` : '—', color:'#F97316' },
+    { label:'Contas a Pagar',       value: fmt(totalContas), sub: `${contasPeriodo.length} conta(s) no período`, color:'var(--red)' },
+    { label:'Lucro Real',           value: fmt(lucro),       sub: `Margem: ${fmtPct(margem)}`, color: lucro >= 0 ? 'var(--green)' : 'var(--red)' },
   ];
 
   document.getElementById('kpi-grid').innerHTML = kpis.map(k => `
@@ -585,7 +603,6 @@ function renderDashboard() {
 
 // ── EVOLUÇÃO (line chart) ────────────────────────────────
 function renderEvolucao(dados) {
-  // Agrupa por semana ou dia dependendo do período
   const agrupa = periodoAtivo <= 30 ? 'dia' : 'semana';
   const mapa = {};
   dados.forEach(r => {
@@ -601,7 +618,23 @@ function renderEvolucao(dados) {
     }
     if (!mapa[key]) mapa[key] = { fat: 0, lucro: 0 };
     mapa[key].fat   += r.valorTotal;
-    mapa[key].lucro += (r.valorTotal - r.custoTotal);
+    mapa[key].lucro += (r.valorTotal - r.custoTotal - calcularTaxas(r.canal, r.valorTotal, r.quantidade));
+  });
+
+  // Debita contas a pagar por data de vencimento
+  filtrarContasPorPeriodo(allContas).forEach(c => {
+    if (c.situacao.toLowerCase().includes('cancelad')) return;
+    const d = new Date(c.vencimento);
+    if (isNaN(d)) return;
+    let key;
+    if (agrupa === 'dia') {
+      key = c.vencimento.substring(0,10);
+    } else {
+      const start = new Date(d);
+      start.setDate(d.getDate() - d.getDay());
+      key = start.toISOString().substring(0,10);
+    }
+    if (mapa[key]) mapa[key].lucro -= c.valor;
   });
 
   const labels = Object.keys(mapa).sort();
