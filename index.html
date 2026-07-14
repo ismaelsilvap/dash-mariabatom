@@ -219,6 +219,10 @@
   .conta-info { flex: 1; min-width: 0; }
   .conta-fornecedor { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .conta-desc { font-size: 11px; color: var(--text3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .conta-categoria {
+    font-size: 10px; font-weight: 600; color: var(--accent); background: var(--accent-glow);
+    padding: 2px 8px; border-radius: 4px; white-space: nowrap; flex-shrink: 0;
+  }
   .conta-right { text-align: right; flex-shrink: 0; }
   .conta-valor { font-size: 13px; font-weight: 600; }
   .conta-venc { font-size: 11px; color: var(--text3); }
@@ -355,7 +359,7 @@
         <div class="chart-card">
           <div class="card-header">
             <div>
-              <div class="card-title">Faturamento × Lucro Real</div>
+              <div class="card-title">Faturamento × Lucro Líquido</div>
               <div class="card-sub">Evolução no período selecionado</div>
             </div>
           </div>
@@ -400,11 +404,24 @@
 
     <!-- PÁGINA: CONTAS A PAGAR -->
     <div id="page-contas" class="content" style="display:none">
+
+      <div class="kpi-grid" id="contas-kpi-grid" style="grid-template-columns:repeat(3,1fr)"></div>
+
+      <div class="chart-card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Lucro do Mês (Faturamento − Contas a Pagar)</div>
+            <div class="card-sub">Por mês, com o total geral ao final</div>
+          </div>
+        </div>
+        <div class="chart-wrap"><canvas id="chart-lucro-mensal"></canvas></div>
+      </div>
+
       <div class="chart-card">
         <div class="card-header">
           <div>
             <div class="card-title">Contas a Pagar</div>
-            <div class="card-sub">Sincronizado do Bling</div>
+            <div class="card-sub">Filtradas pelo período selecionado no topo — sincronizado do Bling</div>
           </div>
         </div>
         <div id="contas-list"><div class="loading"><div class="spinner"></div></div></div>
@@ -489,6 +506,7 @@ function showPage(name) {
   });
   const titles = { overview:'Dashboard', contas:'Contas a Pagar', config:'Configurações' };
   document.getElementById('page-title').textContent = titles[name];
+  if (name === 'contas' && allContas.length) renderContas();
 }
 
 // ── FILTRO DE DATAS ─────────────────────────────────────
@@ -649,10 +667,10 @@ function normalizarConta(row) {
   return {
     fornecedor: String(row['Fornecedor'] || ''),
     descricao:  String(row['Descrição'] || ''),
+    categoria:  String(row['Categoria'] || ''),
     vencimento: String(row['Vencimento'] || ''),
     valor:      parseFloat(row['Valor']) || 0,
     situacao:   String(row['Situação'] || ''),
-    // 'ID Contato (Bling)' é coluna interna — não usada no dashboard
   };
 }
 
@@ -704,25 +722,20 @@ const fmtN = v => (v||0).toLocaleString('pt-BR');
 function renderDashboard() {
   const dados = filtrarPorPeriodo(allPedidos);
 
-  // Filtra contas a pagar pelo vencimento no mesmo período
-  const contasPeriodo = filtrarContasPorPeriodo(allContas);
-  const totalContas = contasPeriodo
-    .filter(c => !c.situacao.toLowerCase().includes('cancelad'))
-    .reduce((s, c) => s + c.valor, 0);
-
-  const faturamento = dados.reduce((s,r) => s + r.valorTotal, 0);
-  const custo       = dados.reduce((s,r) => s + r.custoTotal, 0);
-  const totalTaxas  = dados.reduce((s,r) => s + calcularTaxas(r.canal, r.valorTotal, r.quantidade), 0);
-  const lucro       = faturamento - custo - totalTaxas - totalContas;
-  const margem      = faturamento > 0 ? lucro / faturamento : 0;
-  const pedidos     = new Set(dados.map(r => r.numeroPedido)).size;
+  const faturamento  = dados.reduce((s,r) => s + r.valorTotal, 0);
+  const quantidade   = dados.reduce((s,r) => s + r.quantidade, 0);
+  const custo        = dados.reduce((s,r) => s + r.custoTotal, 0);
+  const lucroBruto   = faturamento - custo;
+  const totalTaxas   = dados.reduce((s,r) => s + calcularTaxas(r.canal, r.valorTotal, r.quantidade), 0);
+  const lucroLiquido = lucroBruto - totalTaxas;
+  const pedidos      = new Set(dados.map(r => r.numeroPedido)).size;
 
   const kpis = [
-    { label:'Faturamento Bruto',   value: fmt(faturamento), sub: `${fmtN(pedidos)} pedidos`, color:'var(--cyan)' },
-    { label:'Custo Total (CMV)',    value: fmt(custo),       sub: faturamento > 0 ? `${fmtPct(custo/faturamento)} do faturamento` : '—', color:'var(--amber)' },
-    { label:'Impostos e Taxas',     value: fmt(totalTaxas),  sub: faturamento > 0 ? `${fmtPct(totalTaxas/faturamento)} do faturamento` : '—', color:'#F97316' },
-    { label:'Contas a Pagar',       value: fmt(totalContas), sub: `${contasPeriodo.length} conta(s) no período`, color:'var(--red)' },
-    { label:'Lucro Real',           value: fmt(lucro),       sub: `Margem: ${fmtPct(margem)}`, color: lucro >= 0 ? 'var(--green)' : 'var(--red)' },
+    { label:'Faturamento Bruto',              value: fmt(faturamento),  sub: `${fmtN(pedidos)} pedidos`, color:'var(--cyan)' },
+    { label:'Qtd. Produtos Vendidos',         value: fmtN(quantidade),  sub: 'unidades no período', color:'var(--accent)' },
+    { label:'Custo Total',                    value: fmt(custo),        sub: faturamento > 0 ? `${fmtPct(custo/faturamento)} do faturamento` : '—', color:'var(--amber)' },
+    { label:'Lucro Bruto',                    value: fmt(lucroBruto),   sub: 'Faturamento − Custo', color: lucroBruto >= 0 ? 'var(--green)' : 'var(--red)' },
+    { label:'Lucro Líquido',                  value: fmt(lucroLiquido), sub: 'Lucro Bruto − Impostos/Taxas', color: lucroLiquido >= 0 ? 'var(--green)' : 'var(--red)' },
   ];
 
   document.getElementById('kpi-grid').innerHTML = kpis.map(k => `
@@ -766,22 +779,6 @@ function renderEvolucao(dados) {
     mapa[key].lucro += (r.valorTotal - r.custoTotal - calcularTaxas(r.canal, r.valorTotal, r.quantidade));
   });
 
-  // Debita contas a pagar por data de vencimento
-  filtrarContasPorPeriodo(allContas).forEach(c => {
-    if (c.situacao.toLowerCase().includes('cancelad')) return;
-    const d = new Date(c.vencimento);
-    if (isNaN(d)) return;
-    let key;
-    if (agrupa === 'dia') {
-      key = c.vencimento.substring(0,10);
-    } else {
-      const start = new Date(d);
-      start.setDate(d.getDate() - d.getDay());
-      key = start.toISOString().substring(0,10);
-    }
-    if (mapa[key]) mapa[key].lucro -= c.valor;
-  });
-
   const labels = Object.keys(mapa).sort();
   const fatData   = labels.map(k => mapa[k].fat);
   const lucroData = labels.map(k => mapa[k].lucro);
@@ -804,7 +801,7 @@ function renderEvolucao(dados) {
           borderWidth: 2, tension: 0.4, fill: true, pointRadius: 3, pointHoverRadius: 5,
         },
         {
-          label: 'Lucro Real', data: lucroData,
+          label: 'Lucro Líquido', data: lucroData,
           borderColor: '#7C3AED', backgroundColor: '#7C3AED15',
           borderWidth: 2, tension: 0.4, fill: true, pointRadius: 3, pointHoverRadius: 5,
         },
@@ -921,14 +918,45 @@ function renderTopProdutos(dados) {
 }
 
 // ── RENDER CONTAS ────────────────────────────────────────
+let chartLucroMensal = null;
+
 function renderContas() {
+  renderContasKpis();
+  renderContasLista();
+  renderLucroMensal();
+}
+
+function renderContasKpis() {
+  const contasPeriodo = filtrarContasPorPeriodo(allContas).filter(c => !c.situacao.toLowerCase().includes('cancelad'));
+  const total = contasPeriodo.reduce((s,c) => s + c.valor, 0);
+  const pagas = contasPeriodo.filter(c => c.situacao.toLowerCase().includes('paga')).reduce((s,c) => s + c.valor, 0);
+  const hoje = new Date(); hoje.setHours(0,0,0,0);
+  const atrasadas = contasPeriodo
+    .filter(c => { const d = new Date(c.vencimento); return !isNaN(d) && d < hoje && !c.situacao.toLowerCase().includes('paga'); })
+    .reduce((s,c) => s + c.valor, 0);
+
+  const kpis = [
+    { label:'Total no Período', value: fmt(total), sub: `${contasPeriodo.length} conta(s)`, color:'var(--cyan)' },
+    { label:'Já Pago', value: fmt(pagas), sub: total > 0 ? fmtPct(pagas/total) + ' do total' : '—', color:'var(--green)' },
+    { label:'Atrasado', value: fmt(atrasadas), sub: 'vencidas e não pagas', color:'var(--red)' },
+  ];
+  document.getElementById('contas-kpi-grid').innerHTML = kpis.map(k => `
+    <div class="kpi-card" style="--card-accent:${k.color}">
+      <div class="kpi-label">${k.label}</div>
+      <div class="kpi-value">${k.value}</div>
+      <div class="kpi-sub">${k.sub}</div>
+    </div>`).join('');
+}
+
+function renderContasLista() {
   const el = document.getElementById('contas-list');
-  if (!allContas.length) {
-    el.innerHTML = '<div class="empty">Nenhuma conta a pagar carregada.<br>Rode "Sincronizar agora" no Apps Script.</div>';
+  const contas = filtrarContasPorPeriodo(allContas);
+  if (!contas.length) {
+    el.innerHTML = '<div class="empty">Nenhuma conta a pagar no período selecionado.</div>';
     return;
   }
   const hoje = new Date(); hoje.setHours(0,0,0,0);
-  const sorted = [...allContas].sort((a,b) => new Date(a.vencimento) - new Date(b.vencimento));
+  const sorted = [...contas].sort((a,b) => new Date(a.vencimento) - new Date(b.vencimento));
 
   el.innerHTML = sorted.map(c => {
     const venc = new Date(c.vencimento);
@@ -936,7 +964,7 @@ function renderContas() {
     const sit = String(c.situacao || '').toLowerCase();
 
     let statusClass, statusLabel;
-    if (sit.includes('paga') || sit.includes('pago') || sit === '2') {
+    if (sit.includes('paga') || sit.includes('pago')) {
       statusClass = 'status-pago'; statusLabel = 'Paga';
     } else if (sit.includes('cancelad')) {
       statusClass = 'status-pendente'; statusLabel = 'Cancelada';
@@ -953,6 +981,7 @@ function renderContas() {
           <div class="conta-fornecedor">${c.fornecedor || '—'}</div>
           <div class="conta-desc">${c.descricao || ''}</div>
         </div>
+        ${c.categoria ? `<div class="conta-categoria">${c.categoria}</div>` : ''}
         <div class="conta-right">
           <div class="conta-valor" style="color:${corValor}">${fmt(c.valor)}</div>
           <div class="conta-venc">Vence: ${vencStr}</div>
@@ -960,6 +989,74 @@ function renderContas() {
         <div><span class="status-badge ${statusClass}">${statusLabel}</span></div>
       </div>`;
   }).join('');
+}
+
+// Gráfico horizontal: Lucro do Mês = Faturamento Bruto do mês − Contas a Pagar do mês (por vencimento)
+// Usa todos os dados disponíveis (não respeita o filtro rápido do topo, pois é uma visão multi-mês por natureza)
+function renderLucroMensal() {
+  const mapa = {}; // 'YYYY-MM' -> { fat, contas }
+
+  allPedidos.forEach(r => {
+    const key = (r.data || '').substring(0,7);
+    if (!key || key.length !== 7) return;
+    if (!mapa[key]) mapa[key] = { fat: 0, contas: 0 };
+    mapa[key].fat += r.valorTotal;
+  });
+
+  allContas.forEach(c => {
+    if (c.situacao.toLowerCase().includes('cancelad')) return;
+    const key = (c.vencimento || '').substring(0,7);
+    if (!key || key.length !== 7) return;
+    if (!mapa[key]) mapa[key] = { fat: 0, contas: 0 };
+    mapa[key].contas += c.valor;
+  });
+
+  const meses = Object.keys(mapa).sort();
+  const nomesMes = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+  const labels = meses.map(k => { const [y,m] = k.split('-'); return nomesMes[parseInt(m)-1] + '/' + y.substring(2); });
+  const valores = meses.map(k => mapa[k].fat - mapa[k].contas);
+
+  // Total geral ao final
+  const totalGeral = valores.reduce((s,v) => s + v, 0);
+  labels.push('TOTAL');
+  valores.push(totalGeral);
+
+  const cores = valores.map((v,i) => i === valores.length-1 ? '#FFFFFF' : (v >= 0 ? '#10B981' : '#EF4444'));
+
+  const ctx = document.getElementById('chart-lucro-mensal').getContext('2d');
+  if (chartLucroMensal) chartLucroMensal.destroy();
+
+  const alturaPorBarra = 34;
+  document.getElementById('chart-lucro-mensal').parentElement.style.height = Math.max(200, labels.length * alturaPorBarra) + 'px';
+
+  chartLucroMensal = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [{
+        data: valores,
+        backgroundColor: cores,
+        borderRadius: 4,
+        barThickness: 20,
+      }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1A1A25', borderColor: '#2A2A3E', borderWidth: 1,
+          titleColor: '#E2E8F0', bodyColor: '#94A3B8',
+          callbacks: { label: ctx => ' ' + fmt(ctx.parsed.x) }
+        }
+      },
+      scales: {
+        x: { grid: { color: '#1E1E2E' }, ticks: { color: '#64748B', font: { size: 10 }, callback: v => 'R$' + (v/1000).toFixed(0)+'k' } },
+        y: { grid: { display: false }, ticks: { color: '#94A3B8', font: { size: 11, weight: '600' } } }
+      }
+    }
+  });
 }
 
 // ── CONFIG ───────────────────────────────────────────────
