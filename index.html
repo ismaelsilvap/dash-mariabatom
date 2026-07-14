@@ -719,11 +719,27 @@ function parseDataFlexivel(v) {
 
 // ── NORMALIZAÇÃO — relatório de VENDAS exportado do Bling ──
 function normalizarPedido(row) {
-  const qtd       = parseNumBR(row['Quantidade']);
-  const custoUnit = parseNumBR(row['Preço de custo']);
-  const frete     = parseNumBR(row['Frete proporcional']);
-  const outras    = parseNumBR(row['Outras Despesas']);
-  const produto   = String(row['Descrição'] || '').trim();
+  const qtd          = parseNumBR(row['Quantidade']);
+  const valorUnit     = parseNumBR(row['Preço unitário']);
+  const custoUnitRaw  = parseNumBR(row['Preço de custo']);
+  const frete         = parseNumBR(row['Frete proporcional']);
+  const outras        = parseNumBR(row['Outras Despesas']);
+  const produto       = String(row['Descrição'] || '').trim();
+
+  // P.U Total = Preço unitário × Quantidade (linha por linha)
+  const puTotal = valorUnit * qtd;
+
+  // Quando o Bling não tem custo cadastrado (0), estima: P.U Total ÷ 2,025
+  let custoUnit, custoTotal;
+  if (!custoUnitRaw || custoUnitRaw === 0) {
+    const custoEstimado = puTotal / 2.025;
+    custoUnit  = qtd > 0 ? custoEstimado / qtd : 0;
+    custoTotal = custoEstimado + frete + outras;
+  } else {
+    custoUnit  = custoUnitRaw;
+    custoTotal = (custoUnitRaw * qtd) + frete + outras;
+  }
+
   return {
     data:         parseDataFlexivel(row['Data']),
     numeroPedido: String(row['Número do pedido'] || '').trim(),
@@ -731,10 +747,12 @@ function normalizarPedido(row) {
     produto:      produto,
     sku:          produto, // relatório não tem SKU — agrupa por nome do produto
     quantidade:   qtd,
-    valorUnit:    parseNumBR(row['Preço unitário']),
+    valorUnit:    valorUnit,
+    puTotal:      puTotal,
     valorTotal:   parseNumBR(row['Valor total']),
     custoUnit:    custoUnit,
-    custoTotal:   (custoUnit * qtd) + frete + outras,
+    custoTotal:   custoTotal,
+    custoEstimado: (!custoUnitRaw || custoUnitRaw === 0),
     desconto:     parseNumBR(row['Desconto']),
     situacao:     String(row['Situação'] || '').trim(),
   };
