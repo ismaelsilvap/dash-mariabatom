@@ -814,8 +814,8 @@ async function handleUpload(file, tipo) {
     }
 
     if (tipo === 'vendas') {
-      const novos = rows.map(normalizarPedido).filter(r => r.numeroPedido && r.valorTotal !== 0);
-      allPedidos = mergeDados_(allPedidos, novos, r => [r.numeroPedido, r.produto, r.data, r.valorTotal].join('|'));
+      const novos = rows.map(normalizarPedido).filter(r => r.numeroPedido && r.produto);
+      allPedidos = mergeDados_(allPedidos, novos, r => [r.numeroPedido, r.produto, r.data, r.quantidade, r.valorUnit, r.valorTotal].join('|'));
       localStorage.setItem('dash_vendas_v1', JSON.stringify(allPedidos));
     } else {
       const novos = rows.map(normalizarConta).filter(r => r.fornecedor && r.valor !== 0);
@@ -891,19 +891,20 @@ const fmtN = v => (v||0).toLocaleString('pt-BR');
 function renderDashboard() {
   const dados = filtrarPorPeriodo(allPedidos);
 
-  const faturamento  = dados.reduce((s,r) => s + r.valorTotal, 0);
-  const quantidade   = dados.reduce((s,r) => s + r.quantidade, 0);
-  const custo        = dados.reduce((s,r) => s + r.custoTotal, 0);
-  const lucroBruto   = faturamento - custo;
-  const totalTaxas   = dados.reduce((s,r) => s + calcularTaxas(r.canal, r.valorTotal, r.quantidade), 0);
-  const lucroLiquido = lucroBruto - totalTaxas;
-  const pedidos      = new Set(dados.map(r => r.numeroPedido)).size;
+  const faturamento   = dados.reduce((s,r) => s + r.valorTotal, 0);
+  const quantidade    = dados.reduce((s,r) => s + r.quantidade, 0);
+  const custoProdutos = dados.reduce((s,r) => s + r.custoTotal, 0);
+  const totalTaxas    = dados.reduce((s,r) => s + calcularTaxas(r.canal, r.valorTotal, r.quantidade), 0);
+  const custoTotal    = custoProdutos + totalTaxas; // Custo Total = Preço de custo + taxas configuradas
+  const lucroBruto    = faturamento - custoProdutos; // Faturamento − Preço de custo (sem taxas)
+  const lucroLiquido  = lucroBruto - totalTaxas;      // Lucro Bruto − Impostos/Taxas
+  const pedidos       = new Set(dados.map(r => r.numeroPedido)).size;
 
   const kpis = [
     { label:'Faturamento Bruto',              value: fmt(faturamento),  sub: `${fmtN(pedidos)} pedidos`, color:'var(--cyan)' },
     { label:'Qtd. Produtos Vendidos',         value: fmtN(quantidade),  sub: 'unidades no período', color:'var(--accent)' },
-    { label:'Custo Total',                    value: fmt(custo),        sub: faturamento > 0 ? `${fmtPct(custo/faturamento)} do faturamento` : '—', color:'var(--amber)' },
-    { label:'Lucro Bruto',                    value: fmt(lucroBruto),   sub: 'Faturamento − Custo', color: lucroBruto >= 0 ? 'var(--green)' : 'var(--red)' },
+    { label:'Custo Total',                    value: fmt(custoTotal),   sub: `Custo produtos ${fmt(custoProdutos)} + taxas ${fmt(totalTaxas)}`, color:'var(--amber)' },
+    { label:'Lucro Bruto',                    value: fmt(lucroBruto),   sub: 'Faturamento − Preço de Custo', color: lucroBruto >= 0 ? 'var(--green)' : 'var(--red)' },
     { label:'Lucro Líquido',                  value: fmt(lucroLiquido), sub: 'Lucro Bruto − Impostos/Taxas', color: lucroLiquido >= 0 ? 'var(--green)' : 'var(--red)' },
   ];
 
