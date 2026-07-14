@@ -242,6 +242,30 @@
     border-radius: var(--radius); padding: 20px; display: flex; flex-direction: column; gap: 12px;
   }
   .config-panel label { font-size: 12px; color: var(--text2); font-weight: 500; }
+
+  /* UPLOAD */
+  .upload-box {
+    border: 2px dashed var(--border2); border-radius: var(--radius);
+    padding: 28px 20px; text-align: center; cursor: pointer;
+    transition: all 0.15s; margin-bottom: 14px; background: var(--surface2);
+  }
+  .upload-box:hover { border-color: var(--accent); background: var(--accent-glow); }
+  .upload-box.done { border-color: var(--green); border-style: solid; }
+  .upload-icon { font-size: 28px; margin-bottom: 8px; }
+  .upload-title { font-size: 14px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+  .upload-sub { font-size: 12px; color: var(--text3); }
+  .data-summary {
+    background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius-sm);
+    padding: 14px 16px; margin: 14px 0; font-size: 12px; color: var(--text2); line-height: 1.8;
+  }
+  .data-summary strong { color: var(--text); }
+  .btn-secondary {
+    background: none; color: var(--red); border: 1px solid #EF444440;
+    border-radius: var(--radius-sm); padding: 8px 16px;
+    font-size: 12px; font-weight: 600; cursor: pointer; width: 100%;
+    transition: background 0.15s;
+  }
+  .btn-secondary:hover { background: #EF444415; }
   .config-input {
     width: 100%; background: var(--bg); border: 1px solid var(--border2);
     border-radius: var(--radius-sm); padding: 8px 12px;
@@ -430,33 +454,40 @@
 
     <!-- PÁGINA: CONFIG -->
     <div id="page-config" class="content" style="display:none">
-      <div class="chart-card" style="max-width:560px">
-        <div class="card-header"><div><div class="card-title">Configuração da Fonte de Dados</div><div class="card-sub">Cole as URLs de publicação CSV das abas do Google Sheets</div></div></div>
-        <div class="config-panel">
-          <div>
-            <label>URL do Apps Script (Web App)</label>
-            <input class="config-input" id="cfg-api" placeholder="https://script.google.com/macros/s/AKfy.../exec">
-          </div>
-          <button class="btn-primary" onclick="salvarConfig()">Salvar e carregar dados</button>
-        </div>
-        <div style="margin-top:16px; font-size:12px; color:var(--text3); line-height:1.8">
-          <strong style="color:var(--text2)">Como obter a URL:</strong><br>
-          No Apps Script → Implantar → Nova implantação → Tipo: App da Web<br>
-          → Executar como: <strong style="color:var(--text2)">Eu</strong> → Quem pode acessar: <strong style="color:var(--text2)">Qualquer pessoa</strong><br>
-          → Implantar → copie a URL gerada e cole aqui.
+      <div class="chart-card" style="max-width:620px">
+        <div class="card-header"><div><div class="card-title">Importar Relatórios do Bling</div><div class="card-sub">Suba os relatórios exportados do Bling (CSV ou Excel). Novos uploads se somam aos dados já importados — não substituem.</div></div></div>
+
+        <div class="upload-box" id="upload-vendas" onclick="document.getElementById('file-vendas').click()">
+          <input type="file" id="file-vendas" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleUpload(this.files[0],'vendas')">
+          <div class="upload-icon">📄</div>
+          <div class="upload-title">Relatório de Vendas</div>
+          <div class="upload-sub" id="upload-vendas-status">Clique para escolher o arquivo (.csv ou .xlsx)</div>
         </div>
 
-        <div style="margin-top:28px">
-          <div class="card-title" style="margin-bottom:4px">Taxas por Canal de Venda</div>
-          <div class="card-sub" style="margin-bottom:16px">Edite os valores e clique em Salvar Taxas. Os cálculos de lucro atualizam automaticamente.</div>
-          <div id="taxas-editor"></div>
-          <button class="btn-primary" style="margin-top:12px" onclick="salvarTaxas()">Salvar Taxas</button>
+        <div class="upload-box" id="upload-contas" onclick="document.getElementById('file-contas').click()">
+          <input type="file" id="file-contas" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleUpload(this.files[0],'contas')">
+          <div class="upload-icon">📄</div>
+          <div class="upload-title">Relatório de Contas a Pagar</div>
+          <div class="upload-sub" id="upload-contas-status">Clique para escolher o arquivo (.csv ou .xlsx)</div>
         </div>
+
+        <div class="data-summary" id="data-summary"></div>
+
+        <button class="btn-secondary" onclick="limparDados()">Limpar todos os dados importados</button>
+      </div>
+
+      <div class="chart-card" style="max-width:620px">
+        <div class="card-title" style="margin-bottom:4px">Taxas por Canal de Venda</div>
+        <div class="card-sub" style="margin-bottom:16px">Edite os valores e clique em Salvar Taxas. Os cálculos de lucro atualizam automaticamente.</div>
+        <div id="taxas-editor"></div>
+        <button class="btn-primary" style="margin-top:12px" onclick="salvarTaxas()">Salvar Taxas</button>
       </div>
     </div>
 
   </main>
 </div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <script>
 // ── CONFIG ──────────────────────────────────────────────
@@ -647,69 +678,168 @@ function parseCSV(text) {
   });
 }
 
+// ── HELPERS DE FORMATO BR ─────────────────────────────────
+function parseNumBR(v) {
+  if (typeof v === 'number') return v;
+  if (!v) return 0;
+  let s = String(v).trim();
+  if (s === '') return 0;
+  s = s.replace(/R\$/g,'').replace(/\s/g,'');
+  if (s.includes(',') && s.includes('.')) s = s.replace(/\./g,'').replace(',', '.');
+  else if (s.includes(',')) s = s.replace(',', '.');
+  const n = parseFloat(s);
+  return isNaN(n) ? 0 : n;
+}
+
+function excelSerialParaData_(serial) {
+  const utcDias = Math.floor(serial - 25569);
+  return new Date(utcDias * 86400 * 1000);
+}
+
+function formatISO_(d) {
+  const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,'0'), day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+
+// Aceita Date (do xlsx), "DD/MM/AAAA" ou "AAAA-MM-DD" (do csv) e devolve sempre "AAAA-MM-DD"
+function parseDataFlexivel(v) {
+  if (!v) return '';
+  if (v instanceof Date && !isNaN(v)) return formatISO_(v);
+  const s = String(v).trim();
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return m[3] + '-' + m[2].padStart(2,'0') + '-' + m[1].padStart(2,'0');
+  m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return m[1] + '-' + m[2].padStart(2,'0') + '-' + m[3].padStart(2,'0');
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const num = parseFloat(s);
+    if (num > 20000 && num < 60000) return formatISO_(excelSerialParaData_(num));
+  }
+  return s;
+}
+
+// ── NORMALIZAÇÃO — relatório de VENDAS exportado do Bling ──
 function normalizarPedido(row) {
+  const qtd       = parseNumBR(row['Quantidade']);
+  const custoUnit = parseNumBR(row['Preço de custo']);
+  const frete     = parseNumBR(row['Frete proporcional']);
+  const outras    = parseNumBR(row['Outras Despesas']);
+  const produto   = String(row['Descrição'] || '').trim();
   return {
-    data:        row['Data'] || '',
-    numeroPedido:row['Nº Pedido'] || row['N° Pedido'] || '',
-    canal:       row['Canal'] || '',
-    sku:         row['SKU'] || '',
-    produto:     row['Produto'] || '',
-    quantidade:  parseFloat(row['Quantidade']) || 0,
-    valorUnit:   parseFloat(row['Valor Unit. Venda']) || 0,
-    valorTotal:  parseFloat(row['Valor Total Venda']) || 0,
-    custoUnit:   parseFloat(row['Custo Unit.']) || 0,
-    custoTotal:  parseFloat(row['Custo Total']) || 0,
-    situacao:    row['Situação'] || '',
+    data:         parseDataFlexivel(row['Data']),
+    numeroPedido: String(row['Número do pedido'] || '').trim(),
+    canal:        String(row['Nome da Loja'] || '').trim(),
+    produto:      produto,
+    sku:          produto, // relatório não tem SKU — agrupa por nome do produto
+    quantidade:   qtd,
+    valorUnit:    parseNumBR(row['Preço unitário']),
+    valorTotal:   parseNumBR(row['Valor total']),
+    custoUnit:    custoUnit,
+    custoTotal:   (custoUnit * qtd) + frete + outras,
+    desconto:     parseNumBR(row['Desconto']),
+    situacao:     String(row['Situação'] || '').trim(),
   };
 }
 
+// ── NORMALIZAÇÃO — relatório de CONTAS A PAGAR exportado do Bling ──
 function normalizarConta(row) {
   return {
-    fornecedor: String(row['Fornecedor'] || ''),
-    descricao:  String(row['Descrição'] || ''),
-    categoria:  String(row['Categoria'] || ''),
-    vencimento: String(row['Vencimento'] || ''),
-    valor:      parseFloat(row['Valor']) || 0,
-    situacao:   String(row['Situação'] || ''),
+    fornecedor: String(row['Nome'] || '').trim(),
+    descricao:  String(row['Observações'] || '').trim(),
+    categoria:  String(row['Descrição'] || '').trim(),
+    vencimento: parseDataFlexivel(row['Data de vencimento']),
+    valor:      parseNumBR(row['Valor']),
+    situacao:   String(row['Situação'] || '').trim(),
   };
 }
 
-// ── FETCH VIA APPS SCRIPT PROXY ──────────────────────────
-async function fetchAba(aba) {
-  if (!cfg.apiUrl) return [];
-  const url = cfg.apiUrl + (cfg.apiUrl.includes('?') ? '&' : '?') + 'aba=' + encodeURIComponent(aba);
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('Erro ao buscar aba ' + aba + ' (HTTP ' + res.status + ')');
-  const data = await res.json();
-  if (data && data.erro) throw new Error(data.erro);
-  return Array.isArray(data) ? data : [];
+// ── UPLOAD DE ARQUIVOS ────────────────────────────────────
+function mergeDados_(existentes, novos, keyFn) {
+  const mapa = {};
+  existentes.forEach(r => mapa[keyFn(r)] = r);
+  novos.forEach(r => mapa[keyFn(r)] = r); // upload novo sobrescreve linha equivalente (permite corrigir)
+  return Object.values(mapa);
 }
 
-// ── CARREGAR DADOS ───────────────────────────────────────
-async function carregarDados() {
-  if (!cfg.apiUrl) return;
+async function handleUpload(file, tipo) {
+  if (!file) return;
+  const statusEl = document.getElementById('upload-' + tipo + '-status');
+  const boxEl = document.getElementById('upload-' + tipo);
+  statusEl.textContent = 'Processando…';
   try {
-    const [rawPedidos, rawContas, rawConfig] = await Promise.all([
-      fetchAba('Pedidos_Vendas'),
-      fetchAba('Contas_a_Pagar'),
-      fetchAba('Config'),
-    ]);
-
-    allPedidos = rawPedidos.map(normalizarPedido).filter(r => r.valorTotal > 0);
-    allContas  = rawContas.map(normalizarConta);
-
-    if (rawConfig && rawConfig[0]) {
-      const sync = rawConfig[0]['Última Sincronização'] || '';
-      if (sync) {
-        const d = new Date(sync);
-        document.getElementById('last-sync-time').textContent =
-          isNaN(d) ? sync : d.toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
-      }
+    let rows;
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (ext === 'csv') {
+      rows = parseCSV(await file.text());
+    } else {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array', cellDates: true });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
     }
+
+    if (tipo === 'vendas') {
+      const novos = rows.map(normalizarPedido).filter(r => r.numeroPedido && r.valorTotal !== 0);
+      allPedidos = mergeDados_(allPedidos, novos, r => [r.numeroPedido, r.produto, r.data, r.valorTotal].join('|'));
+      localStorage.setItem('dash_vendas_v1', JSON.stringify(allPedidos));
+    } else {
+      const novos = rows.map(normalizarConta).filter(r => r.fornecedor && r.valor !== 0);
+      allContas = mergeDados_(allContas, novos, r => [r.fornecedor, r.vencimento, r.valor, r.categoria].join('|'));
+      localStorage.setItem('dash_contas_v1', JSON.stringify(allContas));
+    }
+
+    boxEl.classList.add('done');
+    statusEl.textContent = `✓ ${rows.length} linha(s) processadas — ${file.name}`;
+    document.getElementById('last-sync-time').textContent = new Date().toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    atualizarResumoDados();
     renderDashboard();
     renderContas();
   } catch(e) {
-    document.getElementById('kpi-grid').innerHTML = `<div class="empty" style="grid-column:1/-1">Erro ao carregar dados.<br>Verifique a URL na aba Configurações.<br><small style="color:var(--red)">${e.message}</small></div>`;
+    statusEl.textContent = 'Erro ao processar arquivo: ' + e.message;
+  }
+}
+
+function fmtDataBR_(iso) {
+  if (!iso) return '';
+  const [y,m,d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function atualizarResumoDados() {
+  const el = document.getElementById('data-summary');
+  if (!allPedidos.length && !allContas.length) { el.innerHTML = ''; return; }
+  const datasV = allPedidos.map(r => r.data).filter(Boolean).sort();
+  const datasC = allContas.map(r => r.vencimento).filter(Boolean).sort();
+  el.innerHTML = `
+    <div>📦 <strong>${allPedidos.length}</strong> linhas de vendas${datasV.length ? ' · ' + fmtDataBR_(datasV[0]) + ' até ' + fmtDataBR_(datasV[datasV.length-1]) : ''}</div>
+    <div>💳 <strong>${allContas.length}</strong> contas a pagar${datasC.length ? ' · vencimentos ' + fmtDataBR_(datasC[0]) + ' até ' + fmtDataBR_(datasC[datasC.length-1]) : ''}</div>
+  `;
+}
+
+function limparDados() {
+  if (!confirm('Isso vai apagar todos os dados importados (vendas e contas a pagar) deste navegador. Continuar?')) return;
+  allPedidos = []; allContas = [];
+  localStorage.removeItem('dash_vendas_v1');
+  localStorage.removeItem('dash_contas_v1');
+  ['vendas','contas'].forEach(t => {
+    document.getElementById('upload-'+t).classList.remove('done');
+    document.getElementById('upload-'+t+'-status').textContent = 'Clique para escolher o arquivo (.csv ou .xlsx)';
+  });
+  atualizarResumoDados();
+  renderDashboard();
+  renderContas();
+}
+
+function carregarDadosSalvos() {
+  try { allPedidos = JSON.parse(localStorage.getItem('dash_vendas_v1') || '[]'); } catch(e) { allPedidos = []; }
+  try { allContas  = JSON.parse(localStorage.getItem('dash_contas_v1') || '[]'); } catch(e) { allContas = []; }
+  atualizarResumoDados();
+  if (allPedidos.length) {
+    document.getElementById('upload-vendas').classList.add('done');
+    document.getElementById('upload-vendas-status').textContent = `✓ ${allPedidos.length} linha(s) carregadas do último upload`;
+  }
+  if (allContas.length) {
+    document.getElementById('upload-contas').classList.add('done');
+    document.getElementById('upload-contas-status').textContent = `✓ ${allContas.length} linha(s) carregadas do último upload`;
   }
 }
 
@@ -1060,15 +1190,7 @@ function renderLucroMensal() {
 }
 
 // ── CONFIG ───────────────────────────────────────────────
-function salvarConfig() {
-  cfg = { ...cfg, apiUrl: document.getElementById('cfg-api').value.trim() };
-  localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
-  carregarDados();
-  showPage('overview');
-}
-
 function carregarInputsConfig() {
-  if (cfg.apiUrl) document.getElementById('cfg-api').value = cfg.apiUrl;
   renderTaxasEditor();
 }
 
@@ -1136,10 +1258,12 @@ function salvarTaxas() {
 // ── INIT ─────────────────────────────────────────────────
 carregarInputsConfig();
 inicializarFiltro();
-if (cfg.apiUrl) {
-  carregarDados();
+carregarDadosSalvos();
+if (allPedidos.length || allContas.length) {
+  renderDashboard();
+  renderContas();
 } else {
-  document.getElementById('kpi-grid').innerHTML = '<div class="empty" style="grid-column:1/-1">Configure a URL do Apps Script na aba <strong style="color:var(--accent)">Configurações</strong> para carregar os dados.</div>';
+  document.getElementById('kpi-grid').innerHTML = '<div class="empty" style="grid-column:1/-1">Suba o relatório de vendas na aba <strong style="color:var(--accent)">Configurações</strong> para começar.</div>';
   showPage('config');
 }
 </script>
