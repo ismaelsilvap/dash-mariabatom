@@ -498,29 +498,47 @@ let allContas  = [];
 let chartEvolucao = null;
 let chartCanais   = null;
 
+// Cores por canal — usa nomes conhecidos quando bate, senão gera uma cor estável por hash
 const CANAL_CORES = {
   'Loja Física':          '#7C3AED',
   'Ecommerce (Nuvemshop)':'#06B6D4',
   'TikTok Shop':          '#F59E0B',
   'Nummus Cashback':      '#10B981',
 };
+const PALETA_CANAIS = ['#7C3AED','#06B6D4','#F59E0B','#10B981','#EC4899','#3B82F6','#F97316','#84CC16','#A855F7','#14B8A6'];
 
-// Taxas por canal — editáveis pelo painel de Configurações
-const TAXAS_DEFAULT = {
-  'Loja Física':           { percentual: 10, frete: 0,  imposto: 0,  embalagem: 0, taxaItem: 0 },
-  'Nummus Cashback':       { percentual: 10, frete: 0,  imposto: 0,  embalagem: 0, taxaItem: 0 },
-  'TikTok Shop':           { percentual: 10, frete: 6,  imposto: 6,  embalagem: 2, taxaItem: 4 },
-  'Ecommerce (Nuvemshop)': { percentual: 5,  frete: 0,  imposto: 6,  embalagem: 0, taxaItem: 0 },
-};
+function corCanal_(canal) {
+  if (CANAL_CORES[canal]) return CANAL_CORES[canal];
+  let hash = 0;
+  for (let i = 0; i < canal.length; i++) hash = (hash * 31 + canal.charCodeAt(i)) >>> 0;
+  return PALETA_CANAIS[hash % PALETA_CANAIS.length];
+}
+
+// Taxas padrão sugeridas — usadas só para pré-preencher quando o nome do canal
+// bate com um padrão conhecido (o valor real fica salvo por canal em cfg.taxas)
+function taxaPadraoSugerida_(canal) {
+  const c = (canal || '').toLowerCase();
+  if (c.includes('física') || c.includes('fisica'))   return { percentual: 10, frete: 0, imposto: 0, embalagem: 0, taxaItem: 0 };
+  if (c.includes('nummus'))                            return { percentual: 10, frete: 0, imposto: 0, embalagem: 0, taxaItem: 0 };
+  if (c.includes('tiktok'))                            return { percentual: 10, frete: 6, imposto: 6, embalagem: 2, taxaItem: 4 };
+  if (c.includes('nuvemshop') || c.includes('ecommerce') || c.includes('e-commerce'))
+                                                         return { percentual: 5,  frete: 0, imposto: 6, embalagem: 0, taxaItem: 0 };
+  return { percentual: 0, frete: 0, imposto: 0, embalagem: 0, taxaItem: 0 };
+}
 
 function getTaxas() {
-  return cfg.taxas || TAXAS_DEFAULT;
+  return cfg.taxas || {};
+}
+
+// Lista de canais distintos presentes nos dados importados (ordem alfabética)
+function canaisDisponiveis_() {
+  return Array.from(new Set(allPedidos.map(r => r.canal).filter(Boolean))).sort();
 }
 
 // Calcula o custo total de taxas de um item de pedido
 function calcularTaxas(canal, valorTotal, quantidade) {
   const taxas = getTaxas();
-  const t = taxas[canal] || { percentual: 0, frete: 0, imposto: 0, embalagem: 0, taxaItem: 0 };
+  const t = taxas[canal] || taxaPadraoSugerida_(canal);
   const pct = ((t.percentual || 0) + (t.frete || 0) + (t.imposto || 0)) / 100;
   const fixo = ((t.embalagem || 0) + (t.taxaItem || 0)) * (quantidade || 1);
   return (valorTotal * pct) + fixo;
@@ -809,6 +827,7 @@ async function handleUpload(file, tipo) {
     statusEl.textContent = `✓ ${rows.length} linha(s) processadas — ${file.name}`;
     document.getElementById('last-sync-time').textContent = new Date().toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
     atualizarResumoDados();
+    renderTaxasEditor();
     renderDashboard();
     renderContas();
   } catch(e) {
@@ -843,6 +862,7 @@ function limparDados() {
     document.getElementById('upload-'+t+'-status').textContent = 'Clique para escolher o arquivo (.csv ou .xlsx)';
   });
   atualizarResumoDados();
+  renderTaxasEditor();
   renderDashboard();
   renderContas();
 }
@@ -851,6 +871,7 @@ function carregarDadosSalvos() {
   try { allPedidos = JSON.parse(localStorage.getItem('dash_vendas_v1') || '[]'); } catch(e) { allPedidos = []; }
   try { allContas  = JSON.parse(localStorage.getItem('dash_contas_v1') || '[]'); } catch(e) { allContas = []; }
   atualizarResumoDados();
+  renderTaxasEditor();
   if (allPedidos.length) {
     document.getElementById('upload-vendas').classList.add('done');
     document.getElementById('upload-vendas-status').textContent = `✓ ${allPedidos.length} linha(s) carregadas do último upload`;
@@ -981,7 +1002,7 @@ function renderDonutCanais(dados) {
     mapa[r.canal] = (mapa[r.canal] || 0) + r.valorTotal;
   });
   const canais = Object.keys(mapa).sort((a,b) => mapa[b]-mapa[a]);
-  const cores  = canais.map(c => CANAL_CORES[c] || '#475569');
+  const cores  = canais.map(c => corCanal_(c));
 
   const ctx = document.getElementById('chart-canais').getContext('2d');
   if (chartCanais) chartCanais.destroy();
@@ -1029,7 +1050,7 @@ function renderTabelaCanais(dados) {
       const d = mapa[c];
       const lucroCanal = d.fat - d.custo - d.taxas;
       const margem = d.fat > 0 ? lucroCanal / d.fat : 0;
-      const cor = CANAL_CORES[c] || '#475569';
+      const cor = corCanal_(c);
       const barW = Math.max(4, Math.round((d.fat / totalFat) * 80));
       return `<tr>
         <td><div class="channel-name"><div class="channel-dot" style="background:${cor}"></div>${c}</div></td>
@@ -1214,36 +1235,42 @@ function carregarInputsConfig() {
 
 function renderTaxasEditor() {
   const taxas = getTaxas();
-  const canais = Object.keys(TAXAS_DEFAULT);
-  document.getElementById('taxas-editor').innerHTML = canais.map(canal => {
-    const t = taxas[canal] || TAXAS_DEFAULT[canal];
-    const cor = CANAL_CORES[canal] || '#475569';
-    const id = canal.replace(/[^a-z0-9]/gi, '_');
+  const canais = canaisDisponiveis_();
+  const el = document.getElementById('taxas-editor');
+
+  if (canais.length === 0) {
+    el.innerHTML = '<div class="empty" style="padding:16px 0">Suba o relatório de vendas primeiro — os canais aparecem aqui automaticamente.</div>';
+    return;
+  }
+
+  el.innerHTML = canais.map((canal, idx) => {
+    const t = taxas[canal] || taxaPadraoSugerida_(canal);
+    const cor = corCanal_(canal);
     return `
-      <div class="taxas-canal">
+      <div class="taxas-canal" data-canal="${canal.replace(/"/g,'&quot;')}">
         <div class="taxas-canal-nome">
           <div class="channel-dot" style="background:${cor}"></div>${canal}
         </div>
         <div class="taxas-fields">
           <div class="taxas-field">
             <label>Comissão %</label>
-            <input type="number" id="tx_${id}_percentual" value="${t.percentual}" min="0" max="100" step="0.1">
+            <input type="number" id="tx_${idx}_percentual" value="${t.percentual}" min="0" max="100" step="0.1">
           </div>
           <div class="taxas-field">
             <label>Frete %</label>
-            <input type="number" id="tx_${id}_frete" value="${t.frete}" min="0" max="100" step="0.1">
+            <input type="number" id="tx_${idx}_frete" value="${t.frete}" min="0" max="100" step="0.1">
           </div>
           <div class="taxas-field">
             <label>Imposto %</label>
-            <input type="number" id="tx_${id}_imposto" value="${t.imposto}" min="0" max="100" step="0.1">
+            <input type="number" id="tx_${idx}_imposto" value="${t.imposto}" min="0" max="100" step="0.1">
           </div>
           <div class="taxas-field">
             <label>Embalagem R$</label>
-            <input type="number" id="tx_${id}_embalagem" value="${t.embalagem}" min="0" step="0.01">
+            <input type="number" id="tx_${idx}_embalagem" value="${t.embalagem}" min="0" step="0.01">
           </div>
           <div class="taxas-field">
             <label>Taxa/item R$</label>
-            <input type="number" id="tx_${id}_taxaItem" value="${t.taxaItem}" min="0" step="0.01">
+            <input type="number" id="tx_${idx}_taxaItem" value="${t.taxaItem}" min="0" step="0.01">
           </div>
         </div>
       </div>`;
@@ -1251,16 +1278,16 @@ function renderTaxasEditor() {
 }
 
 function salvarTaxas() {
-  const canais = Object.keys(TAXAS_DEFAULT);
-  const novasTaxas = {};
-  canais.forEach(canal => {
-    const id = canal.replace(/[^a-z0-9]/gi, '_');
+  const linhas = document.querySelectorAll('#taxas-editor .taxas-canal');
+  const novasTaxas = { ...getTaxas() };
+  linhas.forEach((linha, idx) => {
+    const canal = linha.getAttribute('data-canal');
     novasTaxas[canal] = {
-      percentual: parseFloat(document.getElementById(`tx_${id}_percentual`).value) || 0,
-      frete:      parseFloat(document.getElementById(`tx_${id}_frete`).value) || 0,
-      imposto:    parseFloat(document.getElementById(`tx_${id}_imposto`).value) || 0,
-      embalagem:  parseFloat(document.getElementById(`tx_${id}_embalagem`).value) || 0,
-      taxaItem:   parseFloat(document.getElementById(`tx_${id}_taxaItem`).value) || 0,
+      percentual: parseFloat(document.getElementById(`tx_${idx}_percentual`).value) || 0,
+      frete:      parseFloat(document.getElementById(`tx_${idx}_frete`).value) || 0,
+      imposto:    parseFloat(document.getElementById(`tx_${idx}_imposto`).value) || 0,
+      embalagem:  parseFloat(document.getElementById(`tx_${idx}_embalagem`).value) || 0,
+      taxaItem:   parseFloat(document.getElementById(`tx_${idx}_taxaItem`).value) || 0,
     };
   });
   cfg = { ...cfg, taxas: novasTaxas };
