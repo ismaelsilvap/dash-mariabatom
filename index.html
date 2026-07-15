@@ -223,6 +223,17 @@
     font-size: 10px; font-weight: 600; color: var(--accent); background: var(--accent-glow);
     padding: 2px 8px; border-radius: 4px; white-space: nowrap; flex-shrink: 0;
   }
+  .conta-grupo {
+    font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 2px 7px; border-radius: 4px; white-space: nowrap; flex-shrink: 0;
+  }
+  .grupo-filter { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
+  .grupo-chip {
+    font-size: 11px; font-weight: 600; padding: 5px 12px; border-radius: 20px;
+    border: 1px solid var(--border2); background: var(--surface2); color: var(--text2);
+    cursor: pointer; transition: all 0.15s;
+  }
+  .grupo-chip.active { border-color: transparent; color: #fff; }
   .conta-right { text-align: right; flex-shrink: 0; }
   .conta-valor { font-size: 13px; font-weight: 600; }
   .conta-venc { font-size: 11px; color: var(--text3); }
@@ -448,6 +459,7 @@
             <div class="card-sub">Filtradas pelo período selecionado no topo — sincronizado do Bling</div>
           </div>
         </div>
+        <div class="grupo-filter" id="grupo-filter"></div>
         <div id="contas-list"><div class="loading"><div class="spinner"></div></div></div>
       </div>
     </div>
@@ -776,12 +788,70 @@ function normalizarPedido(row) {
   };
 }
 
+// ── MAPEAMENTO DE CATEGORIAS → GRUPO DE DESPESA ──────────
+function normalizarTexto_(s) {
+  return String(s || '')
+    .toUpperCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // remove acentos
+    .trim();
+}
+
+const GRUPOS_DESPESA = {
+  'Despesas Fixas': [
+    'DESPESAS FIXAS','ADMINISTRATIVAS','AGUA E ESGOTO','ALMOÇO/LANCHE','ALMOCO/LANCHE','ALUGUEL',
+    'APPS DE TRANSPORTE','CONDOMINIO','ENERGIA ELÉTRICA','ENERGIA ELETRICA','IPTU','MATERIAL DE LIMPEZA',
+    'SEGURO IMÓVEL','SEGURO IMOVEL','TELEFONE FIXO E INTERNET','TELEFONIA MÓVEL','TELEFONIA MOVEL',
+    'COM PESSOAL','13º SALÁRIO','13 SALARIO','FGTS','INSS','OUTRAS DESPESAS COM PESSOAL','PLANO DE SAÚDE',
+    'PLANO DE SAUDE','PRÓ-LABORE','PRO-LABORE','SALARIO','SEGURO DE VIDA','VALE REFEIÇÃO','VALE REFEICAO',
+    'VALE TRANSPORTE','FINANCEIRAS','TARIFA BANCÁRIA','TARIFA BANCARIA','TARIFA SUBS/INT',
+    'SERVIÇOS TERCEIROS','SERVICOS TERCEIROS','ALARME','CONTABILIDADE','LIMPEZA/FAXINA',
+    'MENSALIDADE SOFTWARES','SETOR FINANCEIRO','SYSCOIN','TI - MANUTENÇÃO TERCEIRIZADA','TI - MANUTENCAO TERCEIRIZADA',
+  ],
+  'Custo Variável': [
+    'CUSTO VARIÁVEL','CUSTO VARIAVEL','CUSTO COM VENDAS','COMISSÕES VENDEDORES','COMISSOES VENDEDORES',
+    'CUSTOS VARIÁVEIS FINANCEIROS','CUSTOS VARIAVEIS FINANCEIROS','BOLETO','CRÉDITO PARCELADO','CREDITO PARCELADO',
+    'CRÉDITO À VISTA','CREDITO A VISTA','DÉBITO','DEBITO','EMBALAGENS','FORNECEDOR','SIMPLES NACIONAL','TRANSPORTADORA',
+  ],
+  'Investimento': [
+    'INVESTIMENTOS','BENS MATERIAIS','MÓVEIS E UTENSÍLIOS','MOVEIS E UTENSILIOS','REFORMAS E REVITALIZAÇÕES',
+    'REFORMAS E REVITALIZACOES','DESENVOLVIMENTO EMPRESARIAL','TREINAMENTOS/CURSOS/LIVROS','MKT','COMPRA TRAFEGO',
+    'OUTROS INVESTIMENTOS MKT','PAPELARIA (FOLDER, CARTÃO DE VISITA)','PAPELARIA (FOLDER, CARTAO DE VISITA)','PRESTADOR SERVIÇO','PRESTADOR SERVICO',
+  ],
+  'Não Operacionais': [
+    'NÃO OPERACIONAIS','NAO OPERACIONAIS','EMPRÉSTIMO - SAFRA','EMPRESTIMO - SAFRA','PARCELAMENTO SIMPLES',
+  ],
+  'Transferências': [
+    'TRANSFERÊNCIAS','TRANSFERENCIAS',
+  ],
+};
+
+// Índice invertido: categoria normalizada → grupo (montado uma vez)
+const INDICE_GRUPO = {};
+Object.entries(GRUPOS_DESPESA).forEach(([grupo, categorias]) => {
+  categorias.forEach(cat => { INDICE_GRUPO[normalizarTexto_(cat)] = grupo; });
+});
+
+function inferirGrupo_(categoria) {
+  return INDICE_GRUPO[normalizarTexto_(categoria)] || 'Outros';
+}
+
+const GRUPO_CORES = {
+  'Despesas Fixas':    '#EF4444',
+  'Custo Variável':    '#F59E0B',
+  'Investimento':      '#06B6D4',
+  'Não Operacionais':  '#A855F7',
+  'Transferências':    '#64748B',
+  'Outros':            '#475569',
+};
+
 // ── NORMALIZAÇÃO — relatório de CONTAS A PAGAR exportado do Bling ──
 function normalizarConta(row) {
+  const categoria = String(row['Descrição'] || '').trim();
   return {
     fornecedor: String(row['Nome'] || '').trim(),
     descricao:  String(row['Observações'] || '').trim(),
-    categoria:  String(row['Descrição'] || '').trim(),
+    categoria:  categoria,
+    grupo:      inferirGrupo_(categoria),
     vencimento: parseDataFlexivel(row['Data de vencimento']),
     valor:      parseNumBR(row['Valor']),
     situacao:   String(row['Situação'] || '').trim(),
@@ -818,8 +888,8 @@ async function handleUpload(file, tipo) {
       allPedidos = mergeDados_(allPedidos, novos, r => [r.numeroPedido, r.produto, r.data, r.quantidade, r.valorUnit, r.valorTotal].join('|'));
       localStorage.setItem('dash_vendas_v1', JSON.stringify(allPedidos));
     } else {
-      const novos = rows.map(normalizarConta).filter(r => r.fornecedor && r.valor !== 0);
-      allContas = mergeDados_(allContas, novos, r => [r.fornecedor, r.vencimento, r.valor, r.categoria].join('|'));
+      const novos = rows.map(normalizarConta).filter(r => r.fornecedor);
+      allContas = mergeDados_(allContas, novos, r => [r.fornecedor, r.vencimento, r.valor, r.categoria, r.descricao].join('|'));
       localStorage.setItem('dash_contas_v1', JSON.stringify(allContas));
     }
 
@@ -897,7 +967,12 @@ function renderDashboard() {
   const totalTaxas    = dados.reduce((s,r) => s + calcularTaxas(r.canal, r.valorTotal, r.quantidade), 0);
   const custoTotal    = custoProdutos + totalTaxas; // Custo Total = Preço de custo + taxas configuradas
   const lucroBruto    = faturamento - custoProdutos; // Faturamento − Preço de custo (sem taxas)
-  const lucroLiquido  = lucroBruto - totalTaxas;      // Lucro Bruto − Impostos/Taxas
+
+  const despesasFixas = filtrarContasPorPeriodo(allContas)
+    .filter(c => c.grupo === 'Despesas Fixas' && !c.situacao.toLowerCase().includes('cancelad'))
+    .reduce((s,c) => s + c.valor, 0);
+
+  const lucroLiquido  = lucroBruto - totalTaxas - despesasFixas; // Lucro Bruto − Impostos/Taxas − Despesas Fixas
   const pedidos       = new Set(dados.map(r => r.numeroPedido)).size;
 
   const kpis = [
@@ -905,7 +980,7 @@ function renderDashboard() {
     { label:'Qtd. Produtos Vendidos',         value: fmtN(quantidade),  sub: 'unidades no período', color:'var(--accent)' },
     { label:'Custo Total',                    value: fmt(custoTotal),   sub: `Custo produtos ${fmt(custoProdutos)} + taxas ${fmt(totalTaxas)}`, color:'var(--amber)' },
     { label:'Lucro Bruto',                    value: fmt(lucroBruto),   sub: 'Faturamento − Preço de Custo', color: lucroBruto >= 0 ? 'var(--green)' : 'var(--red)' },
-    { label:'Lucro Líquido',                  value: fmt(lucroLiquido), sub: 'Lucro Bruto − Impostos/Taxas', color: lucroLiquido >= 0 ? 'var(--green)' : 'var(--red)' },
+    { label:'Lucro Líquido',                  value: fmt(lucroLiquido), sub: `− Taxas ${fmt(totalTaxas)} − Desp. Fixas ${fmt(despesasFixas)}`, color: lucroLiquido >= 0 ? 'var(--green)' : 'var(--red)' },
   ];
 
   document.getElementById('kpi-grid').innerHTML = kpis.map(k => `
@@ -1089,15 +1164,42 @@ function renderTopProdutos(dados) {
 
 // ── RENDER CONTAS ────────────────────────────────────────
 let chartLucroMensal = null;
+let grupoAtivo = 'Todos';
 
 function renderContas() {
+  renderGrupoFilter();
   renderContasKpis();
   renderContasLista();
   renderLucroMensal();
 }
 
+function renderGrupoFilter() {
+  const grupos = ['Todos', ...Object.keys(GRUPOS_DESPESA)];
+  const gruposPresentes = new Set(allContas.map(c => c.grupo));
+  if (gruposPresentes.has('Outros')) grupos.push('Outros');
+
+  document.getElementById('grupo-filter').innerHTML = grupos.map(g => {
+    const ativo = g === grupoAtivo;
+    const cor = g === 'Todos' ? 'var(--accent)' : (GRUPO_CORES[g] || '#475569');
+    return `<button class="grupo-chip ${ativo ? 'active' : ''}" style="${ativo ? `background:${cor}` : ''}" onclick="setGrupoFiltro('${g.replace(/'/g,"\\'")}')">${g}</button>`;
+  }).join('');
+}
+
+function setGrupoFiltro(grupo) {
+  grupoAtivo = grupo;
+  renderGrupoFilter();
+  renderContasKpis();
+  renderContasLista();
+}
+
+function contasFiltradasGrupo_() {
+  const porPeriodo = filtrarContasPorPeriodo(allContas);
+  if (grupoAtivo === 'Todos') return porPeriodo;
+  return porPeriodo.filter(c => c.grupo === grupoAtivo);
+}
+
 function renderContasKpis() {
-  const contasPeriodo = filtrarContasPorPeriodo(allContas).filter(c => !c.situacao.toLowerCase().includes('cancelad'));
+  const contasPeriodo = contasFiltradasGrupo_().filter(c => !c.situacao.toLowerCase().includes('cancelad'));
   const total = contasPeriodo.reduce((s,c) => s + c.valor, 0);
   const pagas = contasPeriodo.filter(c => c.situacao.toLowerCase().includes('paga')).reduce((s,c) => s + c.valor, 0);
   const hoje = new Date(); hoje.setHours(0,0,0,0);
@@ -1106,7 +1208,7 @@ function renderContasKpis() {
     .reduce((s,c) => s + c.valor, 0);
 
   const kpis = [
-    { label:'Total no Período', value: fmt(total), sub: `${contasPeriodo.length} conta(s)`, color:'var(--cyan)' },
+    { label:'Total no Período', value: fmt(total), sub: `${contasPeriodo.length} conta(s)${grupoAtivo !== 'Todos' ? ' · ' + grupoAtivo : ''}`, color:'var(--cyan)' },
     { label:'Já Pago', value: fmt(pagas), sub: total > 0 ? fmtPct(pagas/total) + ' do total' : '—', color:'var(--green)' },
     { label:'Atrasado', value: fmt(atrasadas), sub: 'vencidas e não pagas', color:'var(--red)' },
   ];
@@ -1120,9 +1222,9 @@ function renderContasKpis() {
 
 function renderContasLista() {
   const el = document.getElementById('contas-list');
-  const contas = filtrarContasPorPeriodo(allContas);
+  const contas = contasFiltradasGrupo_();
   if (!contas.length) {
-    el.innerHTML = '<div class="empty">Nenhuma conta a pagar no período selecionado.</div>';
+    el.innerHTML = '<div class="empty">Nenhuma conta a pagar no período/grupo selecionado.</div>';
     return;
   }
   const hoje = new Date(); hoje.setHours(0,0,0,0);
@@ -1145,12 +1247,14 @@ function renderContasLista() {
     }
 
     const corValor = statusClass === 'status-pago' ? 'var(--green)' : statusClass === 'status-atrasado' ? 'var(--red)' : 'var(--amber)';
+    const corGrupo = GRUPO_CORES[c.grupo] || '#475569';
     return `
       <div class="conta-row">
         <div class="conta-info">
           <div class="conta-fornecedor">${c.fornecedor || '—'}</div>
           <div class="conta-desc">${c.descricao || ''}</div>
         </div>
+        <span class="conta-grupo" style="background:${corGrupo}22;color:${corGrupo}">${c.grupo}</span>
         ${c.categoria ? `<div class="conta-categoria">${c.categoria}</div>` : ''}
         <div class="conta-right">
           <div class="conta-valor" style="color:${corValor}">${fmt(c.valor)}</div>
@@ -1175,6 +1279,7 @@ function renderLucroMensal() {
 
   allContas.forEach(c => {
     if (c.situacao.toLowerCase().includes('cancelad')) return;
+    if (c.grupo === 'Transferências') return; // transferências entre contas próprias não são despesa real
     const key = (c.vencimento || '').substring(0,7);
     if (!key || key.length !== 7) return;
     if (!mapa[key]) mapa[key] = { fat: 0, contas: 0 };
