@@ -440,7 +440,7 @@
     <!-- PÁGINA: CONTAS A PAGAR -->
     <div id="page-contas" class="content" style="display:none">
 
-      <div class="kpi-grid" id="contas-kpi-grid" style="grid-template-columns:repeat(3,1fr)"></div>
+      <div class="kpi-grid" id="contas-kpi-grid" style="grid-template-columns:repeat(4,1fr)"></div>
 
       <div class="chart-card">
         <div class="card-header">
@@ -1206,8 +1206,13 @@ function contasFiltradasGrupo_() {
 }
 
 function renderContasKpis() {
-  const contasPeriodo = contasFiltradasGrupo_().filter(c => !c.situacao.toLowerCase().includes('cancelad'));
+  const todasNoPeriodo = contasFiltradasGrupo_();
+  const canceladas = todasNoPeriodo.filter(c => c.situacao.toLowerCase().includes('cancelad'));
+  const totalCancelado = canceladas.reduce((s,c) => s + c.valor, 0);
+
+  const contasPeriodo = todasNoPeriodo.filter(c => !c.situacao.toLowerCase().includes('cancelad'));
   const total = contasPeriodo.reduce((s,c) => s + c.valor, 0);
+  const totalBruto = todasNoPeriodo.reduce((s,c) => s + c.valor, 0);
   const pagas = contasPeriodo.filter(c => c.situacao.toLowerCase().includes('paga')).reduce((s,c) => s + c.valor, 0);
   const hoje = new Date(); hoje.setHours(0,0,0,0);
   const atrasadas = contasPeriodo
@@ -1215,7 +1220,8 @@ function renderContasKpis() {
     .reduce((s,c) => s + c.valor, 0);
 
   const kpis = [
-    { label:'Total no Período', value: fmt(total), sub: `${contasPeriodo.length} conta(s)${grupoAtivo !== 'Todos' ? ' · ' + grupoAtivo : ''}`, color:'var(--cyan)' },
+    { label:'Total no Período', value: fmt(total), sub: `${contasPeriodo.length} conta(s)${grupoAtivo !== 'Todos' ? ' · ' + grupoAtivo : ''} · exclui canceladas`, color:'var(--cyan)' },
+    { label:'Total Bruto (c/ canceladas)', value: fmt(totalBruto), sub: canceladas.length > 0 ? `${canceladas.length} cancelada(s) = ${fmt(totalCancelado)}` : 'nenhuma cancelada no período', color:'#94A3B8' },
     { label:'Já Pago', value: fmt(pagas), sub: total > 0 ? fmtPct(pagas/total) + ' do total' : '—', color:'var(--green)' },
     { label:'Atrasado', value: fmt(atrasadas), sub: 'vencidas e não pagas', color:'var(--red)' },
   ];
@@ -1307,9 +1313,7 @@ function renderLucroMensal() {
 
   const ctx = document.getElementById('chart-lucro-mensal').getContext('2d');
   if (chartLucroMensal) chartLucroMensal.destroy();
-
-  const alturaPorBarra = 34;
-  document.getElementById('chart-lucro-mensal').parentElement.style.height = Math.max(200, labels.length * alturaPorBarra) + 'px';
+  document.getElementById('chart-lucro-mensal').parentElement.style.height = '320px';
 
   chartLucroMensal = new Chart(ctx, {
     type: 'bar',
@@ -1319,23 +1323,22 @@ function renderLucroMensal() {
         data: valores,
         backgroundColor: cores,
         borderRadius: 4,
-        barThickness: 20,
+        barThickness: 28,
       }]
     },
     options: {
-      indexAxis: 'y',
       responsive: true, maintainAspectRatio: false,
       plugins: {
         legend: { display: false },
         tooltip: {
           backgroundColor: '#1A1A25', borderColor: '#2A2A3E', borderWidth: 1,
           titleColor: '#E2E8F0', bodyColor: '#94A3B8',
-          callbacks: { label: ctx => ' ' + fmt(ctx.parsed.x) }
+          callbacks: { label: ctx => ' ' + fmt(ctx.parsed.y) }
         }
       },
       scales: {
-        x: { grid: { color: '#1E1E2E' }, ticks: { color: '#64748B', font: { size: 10 }, callback: v => 'R$' + (v/1000).toFixed(0)+'k' } },
-        y: { grid: { display: false }, ticks: { color: '#94A3B8', font: { size: 11, weight: '600' } } }
+        x: { grid: { display: false }, ticks: { color: '#94A3B8', font: { size: 11, weight: '600' } } },
+        y: { grid: { color: '#1E1E2E' }, ticks: { color: '#64748B', font: { size: 10 }, callback: v => 'R$' + (v/1000).toFixed(0)+'k' } }
       }
     }
   });
