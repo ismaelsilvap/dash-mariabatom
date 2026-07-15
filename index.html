@@ -940,6 +940,13 @@ function limparDados() {
 function carregarDadosSalvos() {
   try { allPedidos = JSON.parse(localStorage.getItem('dash_vendas_v1') || '[]'); } catch(e) { allPedidos = []; }
   try { allContas  = JSON.parse(localStorage.getItem('dash_contas_v1') || '[]'); } catch(e) { allContas = []; }
+
+  // Migração: recalcula o grupo em contas salvas antes desse campo existir (ou se a categoria mudou de grupo)
+  if (allContas.length) {
+    allContas = allContas.map(c => ({ ...c, grupo: inferirGrupo_(c.categoria) }));
+    localStorage.setItem('dash_contas_v1', JSON.stringify(allContas));
+  }
+
   atualizarResumoDados();
   renderTaxasEditor();
   if (allPedidos.length) {
