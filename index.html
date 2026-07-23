@@ -242,6 +242,19 @@
   .status-pendente { background: #F59E0B18; color: var(--amber); }
   .status-atrasado { background: #EF444418; color: var(--red); }
 
+  /* RANKING DE FORNECEDORES */
+  .forn-row { display: grid; grid-template-columns: 1.6fr 70px 110px 60px 1fr; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .forn-row:last-child { border-bottom: none; }
+  .forn-nome { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: flex; align-items: center; gap: 6px; }
+  .forn-flag { font-size: 9px; font-weight: 700; padding: 2px 6px; border-radius: 4px; white-space: nowrap; flex-shrink: 0; }
+  .forn-flag.boletos { background: #F59E0B18; color: var(--amber); }
+  .forn-flag.juro { background: #EF444418; color: var(--red); }
+  .forn-num { font-size: 12px; color: var(--text2); text-align: right; }
+  .forn-valor { font-size: 13px; font-weight: 600; text-align: right; }
+  .forn-pct { font-size: 11px; color: var(--text3); text-align: right; }
+  .forn-bar-track { height: 6px; border-radius: 3px; background: var(--surface2); overflow: hidden; }
+  .forn-bar-fill { height: 100%; border-radius: 3px; background: var(--amber); }
+
   /* ESTADO DE CARREGAMENTO */
   .loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 40px; color: var(--text3); font-size: 13px; }
   .spinner { width: 18px; height: 18px; border: 2px solid var(--border2); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.7s linear infinite; }
@@ -450,6 +463,16 @@
           </div>
         </div>
         <div class="chart-wrap"><canvas id="chart-lucro-mensal"></canvas></div>
+      </div>
+
+      <div class="chart-card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Ranking de Fornecedores</div>
+            <div class="card-sub">Custo de mercadoria (categoria "Fornecedor"), consolidado por fornecedor — período selecionado no topo</div>
+          </div>
+        </div>
+        <div id="ranking-fornecedores"><div class="loading"><div class="spinner"></div></div></div>
       </div>
 
       <div class="chart-card">
@@ -854,6 +877,7 @@ function normalizarConta(row) {
     grupo:      inferirGrupo_(categoria),
     vencimento: parseDataFlexivel(row['Data de vencimento']),
     valor:      parseNumBR(row['Valor']),
+    juro:       parseNumBR(row['Juro']),
     situacao:   String(row['Situação'] || '').trim(),
   };
 }
@@ -1178,6 +1202,58 @@ function renderContas() {
   renderContasKpis();
   renderContasLista();
   renderLucroMensal();
+  renderRankingFornecedores();
+}
+
+// Ranking de fornecedores: usa só as contas categoria "Fornecedor" (custo de mercadoria),
+// respeitando o filtro de período do topo, mas ignorando o filtro de grupo lateral
+// (ranking de fornecedor não faz sentido misturado com aluguel, salário etc.)
+function renderRankingFornecedores() {
+  const el = document.getElementById('ranking-fornecedores');
+  const doPeriodo = filtrarContasPorPeriodo(allContas)
+    .filter(c => normalizarTexto_(c.categoria) === 'FORNECEDOR' && !c.situacao.toLowerCase().includes('cancelad'));
+
+  if (!doPeriodo.length) {
+    el.innerHTML = '<div class="empty">Nenhuma conta de fornecedor no período selecionado.</div>';
+    return;
+  }
+
+  const mapa = {};
+  doPeriodo.forEach(c => {
+    if (!mapa[c.fornecedor]) mapa[c.fornecedor] = { nome: c.fornecedor, total: 0, juro: 0, boletos: 0 };
+    mapa[c.fornecedor].total += c.valor + (c.juro || 0);
+    mapa[c.fornecedor].juro  += (c.juro || 0);
+    mapa[c.fornecedor].boletos += 1;
+  });
+
+  const lista = Object.values(mapa).sort((a,b) => b.total - a.total);
+  const totalGeral = lista.reduce((s,f) => s + f.total, 0);
+  const maior = lista[0].total;
+
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1.6fr 70px 110px 60px 1fr;gap:12px;padding-bottom:8px;margin-bottom:4px;border-bottom:1px solid var(--border2)">
+      <div class="kpi-label" style="margin:0">Fornecedor</div>
+      <div class="kpi-label" style="margin:0;text-align:right">Boletos</div>
+      <div class="kpi-label" style="margin:0;text-align:right">Total pago</div>
+      <div class="kpi-label" style="margin:0;text-align:right">%</div>
+      <div class="kpi-label" style="margin:0">Participação</div>
+    </div>
+    ${lista.map(f => {
+      const pct = totalGeral ? (f.total/totalGeral*100) : 0;
+      const barPct = maior ? (f.total/maior*100) : 0;
+      let flags = '';
+      if (f.boletos >= 4) flags += `<span class="forn-flag boletos">${f.boletos} boletos</span>`;
+      if (f.juro > 0) flags += `<span class="forn-flag juro">juro ${fmt(f.juro)}</span>`;
+      return `
+        <div class="forn-row">
+          <div class="forn-nome">${f.nome}${flags}</div>
+          <div class="forn-num">${f.boletos}</div>
+          <div class="forn-valor">${fmt(f.total)}</div>
+          <div class="forn-pct">${pct.toFixed(1)}%</div>
+          <div class="forn-bar-track"><div class="forn-bar-fill" style="width:${barPct}%"></div></div>
+        </div>`;
+    }).join('')}
+  `;
 }
 
 function renderGrupoFilter() {
