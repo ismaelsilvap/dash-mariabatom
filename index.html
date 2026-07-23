@@ -254,6 +254,9 @@
   .forn-pct { font-size: 11px; color: var(--text3); text-align: right; }
   .forn-bar-track { height: 6px; border-radius: 3px; background: var(--surface2); overflow: hidden; }
   .forn-bar-fill { height: 100%; border-radius: 3px; background: var(--amber); }
+  .forn-total { border-top: 2px solid var(--border2); border-bottom: none !important; margin-top: 4px; padding-top: 12px !important; }
+  .forn-total .forn-nome { font-weight: 700; color: var(--text); }
+  .forn-total .forn-valor { font-weight: 700; color: var(--text); font-size: 14px; }
 
   /* ESTADO DE CARREGAMENTO */
   .loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 40px; color: var(--text3); font-size: 13px; }
@@ -473,6 +476,17 @@
           </div>
         </div>
         <div id="ranking-fornecedores"><div class="loading"><div class="spinner"></div></div></div>
+      </div>
+
+      <div class="chart-card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Ranking por Grupo de Despesa</div>
+            <div class="card-sub">Consolidado por categoria — período selecionado no topo</div>
+          </div>
+        </div>
+        <div class="grupo-filter" id="ranking-grupo-filter"></div>
+        <div id="ranking-despesas"><div class="loading"><div class="spinner"></div></div></div>
       </div>
 
       <div class="chart-card">
@@ -819,6 +833,16 @@ function normalizarTexto_(s) {
     .trim();
 }
 
+// Checagem de status "pago" — usa igualdade exata (não "includes") pra não confundir
+// com textos como "A Pagar" (que contém "paga" mas significa o oposto: ainda não foi pago).
+function isPago_(situacao) {
+  const s = normalizarTexto_(situacao);
+  return ['PAGO', 'PAGA', 'LIQUIDADO', 'LIQUIDADA', 'BAIXADO', 'BAIXADA', 'QUITADO', 'QUITADA'].includes(s);
+}
+function isCancelado_(situacao) {
+  return normalizarTexto_(situacao).includes('CANCELAD');
+}
+
 const GRUPOS_DESPESA = {
   'Despesas Fixas': [
     'DESPESAS FIXAS','ADMINISTRATIVAS','AGUA E ESGOTO','ALMOÇO/LANCHE','ALMOCO/LANCHE','ALUGUEL',
@@ -1000,7 +1024,7 @@ function renderDashboard() {
   const lucroBruto    = faturamento - custoProdutos; // Faturamento − Preço de custo (sem taxas)
 
   const despesasFixas = filtrarContasPorPeriodo(allContas)
-    .filter(c => c.grupo === 'Despesas Fixas' && !c.situacao.toLowerCase().includes('cancelad'))
+    .filter(c => c.grupo === 'Despesas Fixas' && !isCancelado_(c.situacao))
     .reduce((s,c) => s + c.valor, 0);
 
   const lucroLiquido  = lucroBruto - totalTaxas - despesasFixas; // Lucro Bruto − Impostos/Taxas − Despesas Fixas
@@ -1203,6 +1227,8 @@ function renderContas() {
   renderContasLista();
   renderLucroMensal();
   renderRankingFornecedores();
+  renderRankingGrupoFilter();
+  renderRankingDespesas();
 }
 
 // Ranking de fornecedores: usa só as contas categoria "Fornecedor" (custo de mercadoria),
@@ -1211,7 +1237,7 @@ function renderContas() {
 function renderRankingFornecedores() {
   const el = document.getElementById('ranking-fornecedores');
   const doPeriodo = filtrarContasPorPeriodo(allContas)
-    .filter(c => normalizarTexto_(c.categoria) === 'FORNECEDOR' && !c.situacao.toLowerCase().includes('cancelad'));
+    .filter(c => normalizarTexto_(c.categoria) === 'FORNECEDOR' && !isCancelado_(c.situacao));
 
   if (!doPeriodo.length) {
     el.innerHTML = '<div class="empty">Nenhuma conta de fornecedor no período selecionado.</div>';
@@ -1253,6 +1279,88 @@ function renderRankingFornecedores() {
           <div class="forn-bar-track"><div class="forn-bar-fill" style="width:${barPct}%"></div></div>
         </div>`;
     }).join('')}
+    <div class="forn-row forn-total">
+      <div class="forn-nome">TOTAL GERAL</div>
+      <div class="forn-num">${lista.reduce((s,f)=>s+f.boletos,0)}</div>
+      <div class="forn-valor">${fmt(totalGeral)}</div>
+      <div class="forn-pct">100%</div>
+      <div></div>
+    </div>
+  `;
+}
+
+// Ranking por grupo de despesa: agrupa por categoria dentro do grupo selecionado
+// (ex: dentro de "Despesas Fixas" -> Aluguel, Energia Elétrica, Salário...). Tem filtro próprio,
+// independente do filtro de grupo da lista de baixo, mas respeita o período do topo.
+let rankingGrupoAtivo = 'Despesas Fixas';
+
+function renderRankingGrupoFilter() {
+  const grupos = Object.keys(GRUPOS_DESPESA);
+  const gruposPresentes = new Set(allContas.map(c => c.grupo));
+  if (gruposPresentes.has('Outros')) grupos.push('Outros');
+
+  document.getElementById('ranking-grupo-filter').innerHTML = grupos.map(g => {
+    const ativo = g === rankingGrupoAtivo;
+    const cor = GRUPO_CORES[g] || '#475569';
+    return `<button class="grupo-chip ${ativo ? 'active' : ''}" style="${ativo ? `background:${cor}` : ''}" onclick="setRankingGrupoFiltro('${g.replace(/'/g,"\\'")}')">${g}</button>`;
+  }).join('');
+}
+
+function setRankingGrupoFiltro(grupo) {
+  rankingGrupoAtivo = grupo;
+  renderRankingGrupoFilter();
+  renderRankingDespesas();
+}
+
+function renderRankingDespesas() {
+  const el = document.getElementById('ranking-despesas');
+  const doPeriodo = filtrarContasPorPeriodo(allContas)
+    .filter(c => c.grupo === rankingGrupoAtivo && !isCancelado_(c.situacao));
+
+  if (!doPeriodo.length) {
+    el.innerHTML = `<div class="empty">Nenhuma conta de "${rankingGrupoAtivo}" no período selecionado.</div>`;
+    return;
+  }
+
+  const mapa = {};
+  doPeriodo.forEach(c => {
+    const chave = c.categoria || '(sem categoria)';
+    if (!mapa[chave]) mapa[chave] = { nome: chave, total: 0, lancamentos: 0 };
+    mapa[chave].total += c.valor;
+    mapa[chave].lancamentos += 1;
+  });
+
+  const lista = Object.values(mapa).sort((a,b) => b.total - a.total);
+  const totalGeral = lista.reduce((s,f) => s + f.total, 0);
+  const maior = lista[0].total;
+
+  el.innerHTML = `
+    <div style="display:grid;grid-template-columns:1.6fr 70px 110px 60px 1fr;gap:12px;padding-bottom:8px;margin-bottom:4px;border-bottom:1px solid var(--border2)">
+      <div class="kpi-label" style="margin:0">Categoria</div>
+      <div class="kpi-label" style="margin:0;text-align:right">Lanç.</div>
+      <div class="kpi-label" style="margin:0;text-align:right">Total</div>
+      <div class="kpi-label" style="margin:0;text-align:right">%</div>
+      <div class="kpi-label" style="margin:0">Participação</div>
+    </div>
+    ${lista.map(f => {
+      const pct = totalGeral ? (f.total/totalGeral*100) : 0;
+      const barPct = maior ? (f.total/maior*100) : 0;
+      return `
+        <div class="forn-row">
+          <div class="forn-nome">${f.nome}</div>
+          <div class="forn-num">${f.lancamentos}</div>
+          <div class="forn-valor">${fmt(f.total)}</div>
+          <div class="forn-pct">${pct.toFixed(1)}%</div>
+          <div class="forn-bar-track"><div class="forn-bar-fill" style="width:${barPct}%;background:${GRUPO_CORES[rankingGrupoAtivo] || 'var(--amber)'}"></div></div>
+        </div>`;
+    }).join('')}
+    <div class="forn-row forn-total">
+      <div class="forn-nome">TOTAL GERAL</div>
+      <div class="forn-num">${lista.reduce((s,f)=>s+f.lancamentos,0)}</div>
+      <div class="forn-valor">${fmt(totalGeral)}</div>
+      <div class="forn-pct">100%</div>
+      <div></div>
+    </div>
   `;
 }
 
@@ -1283,16 +1391,16 @@ function contasFiltradasGrupo_() {
 
 function renderContasKpis() {
   const todasNoPeriodo = contasFiltradasGrupo_();
-  const canceladas = todasNoPeriodo.filter(c => c.situacao.toLowerCase().includes('cancelad'));
+  const canceladas = todasNoPeriodo.filter(c => isCancelado_(c.situacao));
   const totalCancelado = canceladas.reduce((s,c) => s + c.valor, 0);
 
-  const contasPeriodo = todasNoPeriodo.filter(c => !c.situacao.toLowerCase().includes('cancelad'));
+  const contasPeriodo = todasNoPeriodo.filter(c => !isCancelado_(c.situacao));
   const total = contasPeriodo.reduce((s,c) => s + c.valor, 0);
   const totalBruto = todasNoPeriodo.reduce((s,c) => s + c.valor, 0);
-  const pagas = contasPeriodo.filter(c => c.situacao.toLowerCase().includes('paga')).reduce((s,c) => s + c.valor, 0);
+  const pagas = contasPeriodo.filter(c => isPago_(c.situacao)).reduce((s,c) => s + c.valor, 0);
   const hoje = new Date(); hoje.setHours(0,0,0,0);
   const atrasadas = contasPeriodo
-    .filter(c => { const d = new Date(c.vencimento); return !isNaN(d) && d < hoje && !c.situacao.toLowerCase().includes('paga'); })
+    .filter(c => { const d = new Date(c.vencimento); return !isNaN(d) && d < hoje && !isPago_(c.situacao); })
     .reduce((s,c) => s + c.valor, 0);
 
   const kpis = [
@@ -1322,12 +1430,11 @@ function renderContasLista() {
   el.innerHTML = sorted.map(c => {
     const venc = new Date(c.vencimento);
     const vencStr = isNaN(venc) ? (c.vencimento || '—') : venc.toLocaleDateString('pt-BR');
-    const sit = String(c.situacao || '').toLowerCase();
 
     let statusClass, statusLabel;
-    if (sit.includes('paga') || sit.includes('pago')) {
+    if (isPago_(c.situacao)) {
       statusClass = 'status-pago'; statusLabel = 'Paga';
-    } else if (sit.includes('cancelad')) {
+    } else if (isCancelado_(c.situacao)) {
       statusClass = 'status-pendente'; statusLabel = 'Cancelada';
     } else if (!isNaN(venc) && venc < hoje) {
       statusClass = 'status-atrasado'; statusLabel = 'Atrasada';
@@ -1367,7 +1474,7 @@ function renderLucroMensal() {
   });
 
   allContas.forEach(c => {
-    if (c.situacao.toLowerCase().includes('cancelad')) return;
+    if (isCancelado_(c.situacao)) return;
     if (c.grupo === 'Transferências') return; // transferências entre contas próprias não são despesa real
     const key = (c.vencimento || '').substring(0,7);
     if (!key || key.length !== 7) return;
