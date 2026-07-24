@@ -83,6 +83,17 @@
   }
   .last-sync { font-size: 11px; color: var(--text3); }
   .last-sync span { color: var(--green); font-weight: 500; }
+  .btn-refresh {
+    width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+    background: var(--accent); color: #fff; border: none;
+    border-radius: var(--radius-sm); padding: 9px 12px;
+    font-size: 12px; font-weight: 600; cursor: pointer; margin-bottom: 10px;
+    transition: opacity 0.15s;
+  }
+  .btn-refresh:hover { opacity: 0.85; }
+  .btn-refresh:disabled { opacity: 0.5; cursor: wait; }
+  .btn-refresh svg.spinning { animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
   /* main */
   .main { flex: 1; overflow-y: auto; display: flex; flex-direction: column; }
@@ -347,6 +358,10 @@
       </button>
     </nav>
     <div class="sidebar-footer">
+      <button class="btn-refresh" id="btn-refresh-drive" onclick="atualizarDoDrive()">
+        <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+        Atualizar do Drive
+      </button>
       <div class="last-sync">Última sync: <span id="last-sync-time">—</span></div>
     </div>
   </aside>
@@ -504,7 +519,24 @@
     <!-- PÁGINA: CONFIG -->
     <div id="page-config" class="content" style="display:none">
       <div class="chart-card" style="max-width:620px">
-        <div class="card-header"><div><div class="card-title">Importar Relatórios do Bling</div><div class="card-sub">Suba os relatórios exportados do Bling (CSV ou Excel). Novos uploads se somam aos dados já importados — não substituem.</div></div></div>
+        <div class="card-header"><div><div class="card-title">Atualizar do Google Drive</div><div class="card-sub">Conecte uma planilha do Drive que você mantém sempre atualizada — clique em "Atualizar" quando quiser buscar os dados mais recentes, sem precisar subir arquivo manualmente.</div></div></div>
+        <div class="config-panel">
+          <div>
+            <label>URL do Apps Script (Web App)</label>
+            <input class="config-input" id="cfg-drive-url" placeholder="https://script.google.com/macros/s/AKfy.../exec">
+          </div>
+          <button class="btn-primary" onclick="salvarConfigDrive()">Salvar</button>
+        </div>
+        <div style="margin-top:14px; font-size:12px; color:var(--text3); line-height:1.8">
+          <strong style="color:var(--text2)">Como configurar (uma vez só):</strong><br>
+          1. Mantenha uma Google Sheet no Drive com as abas "Vendas" e "ContasPagar" (mesmas colunas do relatório do Bling)<br>
+          2. Nela: Extensões → Apps Script → cole o código que te enviei (Drive_Sync_AppsScript.gs) → preencha o ID da planilha<br>
+          3. Implantar → Nova implantação → App da Web → Executar como Eu → Acesso: Qualquer pessoa → copie a URL e cole acima
+        </div>
+      </div>
+
+      <div class="chart-card" style="max-width:620px">
+        <div class="card-header"><div><div class="card-title">Importar Relatórios do Bling (manual)</div><div class="card-sub">Suba os relatórios exportados do Bling (CSV ou Excel). Novos uploads se somam aos dados já importados — não substituem.</div></div></div>
 
         <div class="upload-box" id="upload-vendas" onclick="document.getElementById('file-vendas').click()">
           <input type="file" id="file-vendas" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleUpload(this.files[0],'vendas')">
@@ -1530,6 +1562,70 @@ function renderLucroMensal() {
 // ── CONFIG ───────────────────────────────────────────────
 function carregarInputsConfig() {
   renderTaxasEditor();
+  if (cfg.driveUrl) document.getElementById('cfg-drive-url').value = cfg.driveUrl;
+}
+
+function salvarConfigDrive() {
+  cfg = { ...cfg, driveUrl: document.getElementById('cfg-drive-url').value.trim() };
+  localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+  const btn = event.target;
+  const orig = btn.textContent;
+  btn.textContent = '✓ Salvo!'; btn.style.background = 'var(--green)';
+  setTimeout(() => { btn.textContent = orig; btn.style.background = ''; }, 2000);
+}
+
+async function fetchAbaDrive_(tipo) {
+  const url = cfg.driveUrl + (cfg.driveUrl.includes('?') ? '&' : '?') + 'tipo=' + tipo;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  if (data && data.erro) throw new Error(data.erro);
+  return Array.isArray(data) ? data : [];
+}
+
+async function atualizarDoDrive() {
+  if (!cfg.driveUrl) {
+    alert('Configure a URL do Apps Script na aba Configurações primeiro.');
+    showPage('config');
+    return;
+  }
+
+  const btn = document.getElementById('btn-refresh-drive');
+  const svg = btn.querySelector('svg');
+  btn.disabled = true;
+  svg.classList.add('spinning');
+  const textoOriginal = btn.lastChild.textContent;
+  btn.lastChild.textContent = ' Atualizando…';
+
+  try {
+    const [rowsVendas, rowsContas] = await Promise.all([
+      fetchAbaDrive_('vendas'),
+      fetchAbaDrive_('contas'),
+    ]);
+
+    const novosPedidos = rowsVendas.map(normalizarPedido).filter(r => r.numeroPedido && r.produto);
+    allPedidos = mergeDados_(allPedidos, novosPedidos, r => [r.numeroPedido, r.produto, r.data, r.quantidade, r.valorUnit, r.valorTotal].join('|'));
+    localStorage.setItem('dash_vendas_v1', JSON.stringify(allPedidos));
+
+    const novasContas = rowsContas.map(normalizarConta).filter(r => r.fornecedor);
+    allContas = mergeDados_(allContas, novasContas, r => [r.fornecedor, r.vencimento, r.valor, r.categoria, r.descricao].join('|'));
+    localStorage.setItem('dash_contas_v1', JSON.stringify(allContas));
+
+    document.getElementById('last-sync-time').textContent = new Date().toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    atualizarResumoDados();
+    renderTaxasEditor();
+    renderDashboard();
+    renderContas();
+
+    btn.lastChild.textContent = ' Atualizado!';
+    setTimeout(() => { btn.lastChild.textContent = textoOriginal; }, 2000);
+  } catch (e) {
+    alert('Erro ao atualizar do Drive: ' + e.message);
+    btn.lastChild.textContent = textoOriginal;
+  } finally {
+    btn.disabled = false;
+    svg.classList.remove('spinning');
+  }
 }
 
 function renderTaxasEditor() {
