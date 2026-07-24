@@ -266,6 +266,25 @@
   .forn-bar-track { height: 6px; border-radius: 3px; background: var(--surface2); overflow: hidden; }
   .forn-bar-fill { height: 100%; border-radius: 3px; background: var(--amber); }
   .forn-total { border-top: 2px solid var(--border2); border-bottom: none !important; margin-top: 4px; padding-top: 12px !important; }
+
+  /* TABELA DE PRODUTOS */
+  .prod-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .prod-table th {
+    font-size: 10px; font-weight: 600; color: var(--text3);
+    text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 0 8px 10px; text-align: right; border-bottom: 1px solid var(--border2);
+    white-space: nowrap;
+  }
+  .prod-table th:first-child { text-align: left; }
+  .prod-table td { padding: 10px 8px; border-bottom: 1px solid var(--border); text-align: right; vertical-align: middle; }
+  .prod-table td:first-child { text-align: left; }
+  .prod-table tr:last-child td { border-bottom: none; }
+  .prod-table tr:hover td { background: var(--surface2); }
+  .prod-nome { display: flex; align-items: center; gap: 6px; font-weight: 500; }
+  .prod-estimado {
+    font-size: 10px; color: var(--amber); cursor: help; flex-shrink: 0;
+  }
+  .prod-rank { color: var(--text3); font-size: 11px; font-weight: 700; width: 22px; display: inline-block; }
   .forn-total .forn-nome { font-weight: 700; color: var(--text); }
   .forn-total .forn-valor { font-weight: 700; color: var(--text); font-size: 14px; }
 
@@ -350,6 +369,10 @@
       <button class="nav-item" onclick="showPage('contas')">
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M9 14l6-6"/><path d="M20 12V8H4v13a1 1 0 001 1h14a1 1 0 001-1v-1"/><path d="M8 8V5a2 2 0 014 0v3"/></svg>
         Contas a Pagar
+      </button>
+      <button class="nav-item" onclick="showPage('produtos')">
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><circle cx="7" cy="7" r="1.5"/></svg>
+        Produtos
       </button>
       <span class="nav-section">Configuração</span>
       <button class="nav-item" onclick="showPage('config')">
@@ -516,6 +539,33 @@
       </div>
     </div>
 
+    <!-- PÁGINA: PRODUTOS -->
+    <div id="page-produtos" class="content" style="display:none">
+      <div style="font-size:12px;color:var(--text3);margin-top:-8px">Visão geral de todo o histórico importado — não usa o filtro de período do topo.</div>
+
+      <div class="kpi-grid" id="produtos-kpi-grid" style="grid-template-columns:repeat(3,1fr)"></div>
+
+      <div class="chart-card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Top 10 Produtos Mais Lucrativos</div>
+            <div class="card-sub">Por Lucro Bruto (R$) — todo o período importado</div>
+          </div>
+        </div>
+        <div class="chart-wrap" style="height:340px"><canvas id="chart-top-produtos"></canvas></div>
+      </div>
+
+      <div class="chart-card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Ranking Completo de Produtos</div>
+            <div class="card-sub">Ordenado por Lucro Bruto — ⚠ indica custo estimado (Bling não tinha o preço de custo cadastrado)</div>
+          </div>
+        </div>
+        <div id="tabela-produtos"><div class="loading"><div class="spinner"></div></div></div>
+      </div>
+    </div>
+
     <!-- PÁGINA: CONFIG -->
     <div id="page-config" class="content" style="display:none">
       <div class="chart-card" style="max-width:620px">
@@ -627,16 +677,17 @@ function calcularTaxas(canal, valorTotal, quantidade) {
 
 // ── NAVEGAÇÃO ────────────────────────────────────────────
 function showPage(name) {
-  ['overview','contas','config'].forEach(p => {
+  ['overview','contas','produtos','config'].forEach(p => {
     document.getElementById('page-'+p).style.display = p === name ? 'flex' : 'none';
     if (p === name) document.getElementById('page-'+p).style.flexDirection = 'column';
   });
   document.querySelectorAll('.nav-item').forEach((el,i) => {
     el.classList.toggle('active', el.getAttribute('onclick').includes(name));
   });
-  const titles = { overview:'Dashboard', contas:'Contas a Pagar', config:'Configurações' };
+  const titles = { overview:'Dashboard', contas:'Contas a Pagar', produtos:'Produtos', config:'Configurações' };
   document.getElementById('page-title').textContent = titles[name];
   if (name === 'contas' && allContas.length) renderContas();
+  if (name === 'produtos' && allPedidos.length) renderProdutos();
 }
 
 // ── FILTRO DE DATAS ─────────────────────────────────────
@@ -1394,6 +1445,96 @@ function renderRankingDespesas() {
       <div></div>
     </div>
   `;
+}
+
+// ── PÁGINA DE PRODUTOS (visão geral, sem filtro de período) ──────
+let chartTopProdutos = null;
+
+function agregarProdutos_() {
+  const mapa = {};
+  allPedidos.forEach(r => {
+    const chave = r.produto || '(sem nome)';
+    if (!mapa[chave]) mapa[chave] = { nome: chave, quantidade: 0, faturamento: 0, custo: 0, estimado: false };
+    mapa[chave].quantidade += r.quantidade;
+    mapa[chave].faturamento += r.valorTotal;
+    mapa[chave].custo += r.custoTotal;
+    if (r.custoEstimado) mapa[chave].estimado = true;
+  });
+  return Object.values(mapa).map(p => {
+    const lucro = p.faturamento - p.custo;
+    const margem = p.faturamento > 0 ? lucro / p.faturamento : 0;
+    return { ...p, lucro, margem };
+  }).sort((a, b) => b.lucro - a.lucro);
+}
+
+function renderProdutos() {
+  const produtos = agregarProdutos_();
+  if (!produtos.length) {
+    document.getElementById('produtos-kpi-grid').innerHTML = '<div class="empty" style="grid-column:1/-1">Nenhum dado de vendas importado ainda.</div>';
+    document.getElementById('tabela-produtos').innerHTML = '';
+    return;
+  }
+
+  const maisLucrativo = produtos[0];
+  const maiorMargem = [...produtos].filter(p => p.faturamento > 0).sort((a,b) => b.margem - a.margem)[0];
+  const estimadosCount = produtos.filter(p => p.estimado).length;
+
+  const kpis = [
+    { label:'Produto Mais Lucrativo', value: maisLucrativo.nome, sub: fmt(maisLucrativo.lucro) + ' de lucro bruto', color:'var(--green)' },
+    { label:'Maior Margem %', value: maiorMargem ? fmtPct(maiorMargem.margem) : '—', sub: maiorMargem ? maiorMargem.nome : '', color:'var(--accent)' },
+    { label:'Produtos Distintos', value: fmtN(produtos.length), sub: estimadosCount > 0 ? `${estimadosCount} com custo estimado` : 'todos com custo real', color:'var(--cyan)' },
+  ];
+  document.getElementById('produtos-kpi-grid').innerHTML = kpis.map(k => `
+    <div class="kpi-card" style="--card-accent:${k.color}">
+      <div class="kpi-label">${k.label}</div>
+      <div class="kpi-value" style="font-size:16px;line-height:1.3">${k.value}</div>
+      <div class="kpi-sub">${k.sub}</div>
+    </div>`).join('');
+
+  const top10 = produtos.slice(0, 10);
+  const ctx = document.getElementById('chart-top-produtos').getContext('2d');
+  if (chartTopProdutos) chartTopProdutos.destroy();
+  chartTopProdutos = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: top10.map(p => p.nome.length > 24 ? p.nome.slice(0,24) + '…' : p.nome),
+      datasets: [{ data: top10.map(p => p.lucro), backgroundColor: '#7C3AED', borderRadius: 4 }]
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          backgroundColor: '#1A1A25', borderColor: '#2A2A3E', borderWidth: 1,
+          titleColor: '#E2E8F0', bodyColor: '#94A3B8',
+          callbacks: { label: ctx => ' ' + fmt(ctx.parsed.x) }
+        }
+      },
+      scales: {
+        x: { grid: { color: '#1E1E2E' }, ticks: { color: '#64748B', font: { size: 10 }, callback: v => 'R$' + (v/1000).toFixed(0)+'k' } },
+        y: { grid: { display: false }, ticks: { color: '#94A3B8', font: { size: 11 } } }
+      }
+    }
+  });
+
+  document.getElementById('tabela-produtos').innerHTML = `
+    <table class="prod-table">
+      <thead><tr>
+        <th>Produto</th><th>Qtd.</th><th>Faturamento</th><th>Custo</th><th>Lucro Bruto</th><th>Margem %</th>
+      </tr></thead>
+      <tbody>
+        ${produtos.map((p,i) => `
+          <tr>
+            <td><div class="prod-nome"><span class="prod-rank">${i+1}º</span>${p.nome}${p.estimado ? '<span class="prod-estimado" title="Custo estimado (Bling não tinha preço de custo cadastrado para algum item deste produto)">⚠</span>' : ''}</div></td>
+            <td>${fmtN(p.quantidade)}</td>
+            <td>${fmt(p.faturamento)}</td>
+            <td style="color:var(--amber)">${fmt(p.custo)}</td>
+            <td style="color:${p.lucro>=0?'var(--green)':'var(--red)'};font-weight:600">${fmt(p.lucro)}</td>
+            <td>${fmtPct(p.margem)}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
 }
 
 function renderGrupoFilter() {
