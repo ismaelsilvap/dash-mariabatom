@@ -541,15 +541,15 @@
 
     <!-- PÁGINA: PRODUTOS -->
     <div id="page-produtos" class="content" style="display:none">
-      <div style="font-size:12px;color:var(--text3);margin-top:-8px">Visão geral de todo o histórico importado — não usa o filtro de período do topo.</div>
+      <div style="font-size:12px;color:var(--text3);margin-top:-8px">Baseado no catálogo de produtos cadastrados (não nas vendas) — não usa o filtro de período do topo.</div>
 
-      <div class="kpi-grid" id="produtos-kpi-grid" style="grid-template-columns:repeat(3,1fr)"></div>
+      <div class="kpi-grid" id="produtos-kpi-grid" style="grid-template-columns:repeat(5,1fr)"></div>
 
       <div class="chart-card">
         <div class="card-header">
           <div>
             <div class="card-title">Top 10 Produtos Mais Lucrativos</div>
-            <div class="card-sub">Por Lucro Bruto (R$) — todo o período importado</div>
+            <div class="card-sub">Lucro por unidade (Preço − Custo)</div>
           </div>
         </div>
         <div class="chart-wrap" style="height:340px"><canvas id="chart-top-produtos"></canvas></div>
@@ -559,7 +559,7 @@
         <div class="card-header">
           <div>
             <div class="card-title">Ranking Completo de Produtos</div>
-            <div class="card-sub">Ordenado por Lucro Bruto — ⚠ indica custo estimado (Bling não tinha o preço de custo cadastrado)</div>
+            <div class="card-sub">Ordenado por lucro unitário — ⚠ custo estimado (sem preço de custo no Bling) · ⏸ produto inativo</div>
           </div>
         </div>
         <div id="tabela-produtos"><div class="loading"><div class="spinner"></div></div></div>
@@ -579,7 +579,7 @@
         </div>
         <div style="margin-top:14px; font-size:12px; color:var(--text3); line-height:1.8">
           <strong style="color:var(--text2)">Como configurar (uma vez só):</strong><br>
-          1. Mantenha uma Google Sheet no Drive com as abas "Vendas" e "ContasPagar" (mesmas colunas do relatório do Bling)<br>
+          1. Mantenha uma Google Sheet no Drive com as abas "Vendas", "ContasPagar" e "Produtos" (mesmas colunas dos relatórios do Bling)<br>
           2. Nela: Extensões → Apps Script → cole o código que te enviei (Drive_Sync_AppsScript.gs) → preencha o ID da planilha<br>
           3. Implantar → Nova implantação → App da Web → Executar como Eu → Acesso: Qualquer pessoa → copie a URL e cole acima
         </div>
@@ -600,6 +600,13 @@
           <div class="upload-icon">📄</div>
           <div class="upload-title">Relatório de Contas a Pagar</div>
           <div class="upload-sub" id="upload-contas-status">Clique para escolher o arquivo (.csv ou .xlsx)</div>
+        </div>
+
+        <div class="upload-box" id="upload-produtos" onclick="document.getElementById('file-produtos').click()">
+          <input type="file" id="file-produtos" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleUpload(this.files[0],'produtos')">
+          <div class="upload-icon">📦</div>
+          <div class="upload-title">Relatório de Produtos (Catálogo)</div>
+          <div class="upload-sub" id="upload-produtos-status">Clique para escolher o arquivo (.csv ou .xlsx) — usado na aba Produtos, substitui a lista inteira a cada upload</div>
         </div>
 
         <div class="data-summary" id="data-summary"></div>
@@ -626,6 +633,7 @@ const CONFIG_KEY = 'dash_config_v2';
 let cfg = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}');
 let allPedidos = [];
 let allContas  = [];
+let allProdutosCatalogo = [];
 let chartEvolucao = null;
 let chartCanais   = null;
 
@@ -1018,10 +1026,17 @@ async function handleUpload(file, tipo) {
       const novos = rows.map(normalizarPedido).filter(r => r.numeroPedido && r.produto);
       allPedidos = mergeDados_(allPedidos, novos, r => [r.numeroPedido, r.produto, r.data, r.quantidade, r.valorUnit, r.valorTotal].join('|'));
       localStorage.setItem('dash_vendas_v1', JSON.stringify(allPedidos));
-    } else {
+    } else if (tipo === 'contas') {
       const novos = rows.map(normalizarConta).filter(r => r.fornecedor);
       allContas = mergeDados_(allContas, novos, r => [r.fornecedor, r.vencimento, r.valor, r.categoria, r.descricao].join('|'));
       localStorage.setItem('dash_contas_v1', JSON.stringify(allContas));
+    } else if (tipo === 'produtos') {
+      // Catálogo é sempre substituído por inteiro (é uma foto do cadastro atual, não um log de transações)
+      const novosProdutos = rows.map(normalizarProdutoCatalogo).filter(r => r.sku || r.nome);
+      const mapaSku = {};
+      novosProdutos.forEach(p => { mapaSku[p.sku || p.nome] = p; });
+      allProdutosCatalogo = Object.values(mapaSku);
+      localStorage.setItem('dash_produtos_v1', JSON.stringify(allProdutosCatalogo));
     }
 
     boxEl.classList.add('done');
@@ -1031,6 +1046,7 @@ async function handleUpload(file, tipo) {
     renderTaxasEditor();
     renderDashboard();
     renderContas();
+    if (tipo === 'produtos') renderProdutos();
   } catch(e) {
     statusEl.textContent = 'Erro ao processar arquivo: ' + e.message;
   }
@@ -1044,21 +1060,23 @@ function fmtDataBR_(iso) {
 
 function atualizarResumoDados() {
   const el = document.getElementById('data-summary');
-  if (!allPedidos.length && !allContas.length) { el.innerHTML = ''; return; }
+  if (!allPedidos.length && !allContas.length && !allProdutosCatalogo.length) { el.innerHTML = ''; return; }
   const datasV = allPedidos.map(r => r.data).filter(Boolean).sort();
   const datasC = allContas.map(r => r.vencimento).filter(Boolean).sort();
   el.innerHTML = `
     <div>📦 <strong>${allPedidos.length}</strong> linhas de vendas${datasV.length ? ' · ' + fmtDataBR_(datasV[0]) + ' até ' + fmtDataBR_(datasV[datasV.length-1]) : ''}</div>
     <div>💳 <strong>${allContas.length}</strong> contas a pagar${datasC.length ? ' · vencimentos ' + fmtDataBR_(datasC[0]) + ' até ' + fmtDataBR_(datasC[datasC.length-1]) : ''}</div>
+    <div>🏷️ <strong>${allProdutosCatalogo.length}</strong> produtos no catálogo</div>
   `;
 }
 
 function limparDados() {
-  if (!confirm('Isso vai apagar todos os dados importados (vendas e contas a pagar) deste navegador. Continuar?')) return;
-  allPedidos = []; allContas = [];
+  if (!confirm('Isso vai apagar todos os dados importados (vendas, contas a pagar e catálogo de produtos) deste navegador. Continuar?')) return;
+  allPedidos = []; allContas = []; allProdutosCatalogo = [];
   localStorage.removeItem('dash_vendas_v1');
   localStorage.removeItem('dash_contas_v1');
-  ['vendas','contas'].forEach(t => {
+  localStorage.removeItem('dash_produtos_v1');
+  ['vendas','contas','produtos'].forEach(t => {
     document.getElementById('upload-'+t).classList.remove('done');
     document.getElementById('upload-'+t+'-status').textContent = 'Clique para escolher o arquivo (.csv ou .xlsx)';
   });
@@ -1066,11 +1084,13 @@ function limparDados() {
   renderTaxasEditor();
   renderDashboard();
   renderContas();
+  renderProdutos();
 }
 
 function carregarDadosSalvos() {
   try { allPedidos = JSON.parse(localStorage.getItem('dash_vendas_v1') || '[]'); } catch(e) { allPedidos = []; }
   try { allContas  = JSON.parse(localStorage.getItem('dash_contas_v1') || '[]'); } catch(e) { allContas = []; }
+  try { allProdutosCatalogo = JSON.parse(localStorage.getItem('dash_produtos_v1') || '[]'); } catch(e) { allProdutosCatalogo = []; }
 
   // Migração: recalcula o grupo em contas salvas antes desse campo existir (ou se a categoria mudou de grupo)
   if (allContas.length) {
@@ -1087,6 +1107,10 @@ function carregarDadosSalvos() {
   if (allContas.length) {
     document.getElementById('upload-contas').classList.add('done');
     document.getElementById('upload-contas-status').textContent = `✓ ${allContas.length} linha(s) carregadas do último upload`;
+  }
+  if (allProdutosCatalogo.length) {
+    document.getElementById('upload-produtos').classList.add('done');
+    document.getElementById('upload-produtos-status').textContent = `✓ ${allProdutosCatalogo.length} produto(s) carregados do último upload`;
   }
 }
 
@@ -1447,42 +1471,61 @@ function renderRankingDespesas() {
   `;
 }
 
-// ── PÁGINA DE PRODUTOS (visão geral, sem filtro de período) ──────
+// ── PÁGINA DE PRODUTOS — usa o CATÁLOGO cadastrado (não as vendas) ──────
 let chartTopProdutos = null;
 
-function agregarProdutos_() {
-  const mapa = {};
-  allPedidos.forEach(r => {
-    const chave = r.produto || '(sem nome)';
-    if (!mapa[chave]) mapa[chave] = { nome: chave, quantidade: 0, faturamento: 0, custo: 0, estimado: false };
-    mapa[chave].quantidade += r.quantidade;
-    mapa[chave].faturamento += r.valorTotal;
-    mapa[chave].custo += r.custoTotal;
-    if (r.custoEstimado) mapa[chave].estimado = true;
-  });
-  return Object.values(mapa).map(p => {
-    const lucro = p.faturamento - p.custo;
-    const margem = p.faturamento > 0 ? lucro / p.faturamento : 0;
-    return { ...p, lucro, margem };
-  }).sort((a, b) => b.lucro - a.lucro);
+function normalizarProdutoCatalogo(row) {
+  // Aceita tanto o formato novo do relatório quanto o antigo (fallback com ||)
+  const precoVenda    = parseNumBR(row['Preço venda'] ?? row['Preço']);
+  const precoCustoRaw = parseNumBR(row['Preço de custo']);
+  const estoque        = parseNumBR(row['Estoque disponível'] ?? row['Estoque']);
+  const custoEstimado = (!precoCustoRaw || precoCustoRaw === 0);
+  const precoCusto = custoEstimado ? (precoVenda / 2.025) : precoCustoRaw;
+  const lucroUnitario = precoVenda - precoCusto;
+  return {
+    sku:        String(row['Código (SKU)'] ?? row['Código'] ?? '').trim(),
+    nome:       String(row['Nome Produto'] ?? row['Descrição'] ?? '').trim(),
+    situacao:   String(row['Situação'] || '').trim(), // pode não existir no relatório novo — fica vazio
+    categoria:  String(row['Categoria do produto'] || '').trim(), // idem
+    fornecedor: String(row['Fornecedor'] || '').trim(),
+    marca:      String(row['Marca'] || '').trim(),
+    estoque:    estoque,
+    precoVenda: precoVenda,
+    precoCusto: precoCusto,
+    custoEstimado: custoEstimado,
+    lucroUnitario: lucroUnitario,
+    margem:     precoVenda > 0 ? lucroUnitario / precoVenda : 0,
+    lucroPotencialEstoque: lucroUnitario * estoque,
+    valorEstoqueVenda: precoVenda * estoque,
+    valorEstoqueCusto: precoCusto * estoque,
+  };
 }
 
 function renderProdutos() {
-  const produtos = agregarProdutos_();
+  const produtos = [...allProdutosCatalogo].sort((a, b) => b.lucroUnitario - a.lucroUnitario);
+
   if (!produtos.length) {
-    document.getElementById('produtos-kpi-grid').innerHTML = '<div class="empty" style="grid-column:1/-1">Nenhum dado de vendas importado ainda.</div>';
+    document.getElementById('produtos-kpi-grid').innerHTML = '<div class="empty" style="grid-column:1/-1">Suba o relatório de Produtos (catálogo) na aba Configurações.</div>';
     document.getElementById('tabela-produtos').innerHTML = '';
     return;
   }
 
-  const maisLucrativo = produtos[0];
-  const maiorMargem = [...produtos].filter(p => p.faturamento > 0).sort((a,b) => b.margem - a.margem)[0];
-  const estimadosCount = produtos.filter(p => p.estimado).length;
+  const ativos = produtos.filter(p => p.situacao.toLowerCase() === 'ativo');
+  const base = (ativos.length ? ativos : produtos).filter(p => !p.custoEstimado);
+  const baseFallback = base.length ? base : (ativos.length ? ativos : produtos);
+  const maisLucrativo = [...baseFallback].sort((a,b) => b.lucroUnitario - a.lucroUnitario)[0];
+  const maiorMargem = [...baseFallback].filter(p => p.precoVenda > 0).sort((a,b) => b.margem - a.margem)[0];
+  const lucroPotencialTotal = produtos.reduce((s,p) => s + p.lucroPotencialEstoque, 0);
+  const valorEstoqueCustoTotal = produtos.reduce((s,p) => s + p.valorEstoqueCusto, 0);
+  const valorEstoqueVendaTotal = produtos.reduce((s,p) => s + p.valorEstoqueVenda, 0);
+  const estimadosCount = produtos.filter(p => p.custoEstimado).length;
 
   const kpis = [
-    { label:'Produto Mais Lucrativo', value: maisLucrativo.nome, sub: fmt(maisLucrativo.lucro) + ' de lucro bruto', color:'var(--green)' },
+    { label:'Produto Mais Lucrativo (unid.)', value: maisLucrativo.nome, sub: fmt(maisLucrativo.lucroUnitario) + ' de lucro por unidade', color:'var(--green)' },
     { label:'Maior Margem %', value: maiorMargem ? fmtPct(maiorMargem.margem) : '—', sub: maiorMargem ? maiorMargem.nome : '', color:'var(--accent)' },
-    { label:'Produtos Distintos', value: fmtN(produtos.length), sub: estimadosCount > 0 ? `${estimadosCount} com custo estimado` : 'todos com custo real', color:'var(--cyan)' },
+    { label:'Valor em Estoque (custo)', value: fmt(valorEstoqueCustoTotal), sub: 'quanto custou o estoque atual', color:'var(--amber)' },
+    { label:'Valor em Estoque (venda)', value: fmt(valorEstoqueVendaTotal), sub: 'se vender tudo pelo preço de tabela', color:'var(--cyan)' },
+    { label:'Lucro Potencial em Estoque', value: fmt(lucroPotencialTotal), sub: `${fmtN(produtos.length)} produtos · ${estimadosCount} com custo estimado`, color:'var(--green)' },
   ];
   document.getElementById('produtos-kpi-grid').innerHTML = kpis.map(k => `
     <div class="kpi-card" style="--card-accent:${k.color}">
@@ -1498,7 +1541,7 @@ function renderProdutos() {
     type: 'bar',
     data: {
       labels: top10.map(p => p.nome.length > 24 ? p.nome.slice(0,24) + '…' : p.nome),
-      datasets: [{ data: top10.map(p => p.lucro), backgroundColor: '#7C3AED', borderRadius: 4 }]
+      datasets: [{ data: top10.map(p => p.lucroUnitario), backgroundColor: '#7C3AED', borderRadius: 4 }]
     },
     options: {
       indexAxis: 'y',
@@ -1508,11 +1551,11 @@ function renderProdutos() {
         tooltip: {
           backgroundColor: '#1A1A25', borderColor: '#2A2A3E', borderWidth: 1,
           titleColor: '#E2E8F0', bodyColor: '#94A3B8',
-          callbacks: { label: ctx => ' ' + fmt(ctx.parsed.x) }
+          callbacks: { label: ctx => ' ' + fmt(ctx.parsed.x) + ' / unidade' }
         }
       },
       scales: {
-        x: { grid: { color: '#1E1E2E' }, ticks: { color: '#64748B', font: { size: 10 }, callback: v => 'R$' + (v/1000).toFixed(0)+'k' } },
+        x: { grid: { color: '#1E1E2E' }, ticks: { color: '#64748B', font: { size: 10 }, callback: v => 'R$' + v.toFixed(0) } },
         y: { grid: { display: false }, ticks: { color: '#94A3B8', font: { size: 11 } } }
       }
     }
@@ -1521,17 +1564,20 @@ function renderProdutos() {
   document.getElementById('tabela-produtos').innerHTML = `
     <table class="prod-table">
       <thead><tr>
-        <th>Produto</th><th>Qtd.</th><th>Faturamento</th><th>Custo</th><th>Lucro Bruto</th><th>Margem %</th>
+        <th>Produto</th><th>Estoque</th><th>Preço Venda</th><th>Preço Custo</th><th>Lucro Unit.</th><th>Margem %</th><th>Valor Estoque (Venda)</th><th>Valor Estoque (Custo)</th><th>Lucro Potencial</th>
       </tr></thead>
       <tbody>
         ${produtos.map((p,i) => `
           <tr>
-            <td><div class="prod-nome"><span class="prod-rank">${i+1}º</span>${p.nome}${p.estimado ? '<span class="prod-estimado" title="Custo estimado (Bling não tinha preço de custo cadastrado para algum item deste produto)">⚠</span>' : ''}</div></td>
-            <td>${fmtN(p.quantidade)}</td>
-            <td>${fmt(p.faturamento)}</td>
-            <td style="color:var(--amber)">${fmt(p.custo)}</td>
-            <td style="color:${p.lucro>=0?'var(--green)':'var(--red)'};font-weight:600">${fmt(p.lucro)}</td>
+            <td><div class="prod-nome"><span class="prod-rank">${i+1}º</span>${p.nome}${p.custoEstimado ? '<span class="prod-estimado" title="Custo estimado (Bling não tinha preço de custo cadastrado): Preço ÷ 2,025">⚠</span>' : ''}${p.situacao && p.situacao.toLowerCase() !== 'ativo' ? '<span class="prod-estimado" title="Situação: ' + p.situacao + '">⏸</span>' : ''}</div></td>
+            <td>${fmtN(p.estoque)}</td>
+            <td>${fmt(p.precoVenda)}</td>
+            <td style="color:var(--amber)">${fmt(p.precoCusto)}</td>
+            <td style="color:${p.lucroUnitario>=0?'var(--green)':'var(--red)'};font-weight:600">${fmt(p.lucroUnitario)}</td>
             <td>${fmtPct(p.margem)}</td>
+            <td>${fmt(p.valorEstoqueVenda)}</td>
+            <td style="color:var(--amber)">${fmt(p.valorEstoqueCusto)}</td>
+            <td style="color:${p.lucroPotencialEstoque>=0?'var(--green)':'var(--red)'}">${fmt(p.lucroPotencialEstoque)}</td>
           </tr>`).join('')}
       </tbody>
     </table>`;
@@ -1752,11 +1798,26 @@ async function atualizarDoDrive() {
     allContas = mergeDados_(allContas, novasContas, r => [r.fornecedor, r.vencimento, r.valor, r.categoria, r.descricao].join('|'));
     localStorage.setItem('dash_contas_v1', JSON.stringify(allContas));
 
+    // Aba de Produtos é opcional — se ainda não existir na planilha, não quebra o resto da atualização
+    try {
+      const rowsProdutos = await fetchAbaDrive_('produtos');
+      if (rowsProdutos.length) {
+        const novosProdutos = rowsProdutos.map(normalizarProdutoCatalogo).filter(r => r.sku || r.nome);
+        const mapaSku = {};
+        novosProdutos.forEach(p => { mapaSku[p.sku || p.nome] = p; });
+        allProdutosCatalogo = Object.values(mapaSku);
+        localStorage.setItem('dash_produtos_v1', JSON.stringify(allProdutosCatalogo));
+      }
+    } catch (eProdutos) {
+      console.warn('Aba de Produtos não encontrada ou com erro — ignorando nesta atualização:', eProdutos.message);
+    }
+
     document.getElementById('last-sync-time').textContent = new Date().toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
     atualizarResumoDados();
     renderTaxasEditor();
     renderDashboard();
     renderContas();
+    renderProdutos();
 
     btn.lastChild.textContent = ' Atualizado!';
     setTimeout(() => { btn.lastChild.textContent = textoOriginal; }, 2000);
@@ -1847,6 +1908,7 @@ if (allPedidos.length || allContas.length) {
   document.getElementById('kpi-grid').innerHTML = '<div class="empty" style="grid-column:1/-1">Suba o relatório de vendas na aba <strong style="color:var(--accent)">Configurações</strong> para começar.</div>';
   showPage('config');
 }
+if (allProdutosCatalogo.length) renderProdutos();
 </script>
 </body>
 </html>
