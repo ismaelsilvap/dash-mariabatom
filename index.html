@@ -286,26 +286,28 @@
   }
   .prod-rank { color: var(--text3); font-size: 11px; font-weight: 700; width: 22px; display: inline-block; }
 
-  /* TOOLBAR E FILTROS DA TABELA DE PRODUTOS */
+  /* TOOLBAR E ORDENAÇÃO DA TABELA DE PRODUTOS */
   .prod-toolbar {
     display: flex; align-items: center; justify-content: space-between;
     margin-bottom: 12px; flex-wrap: wrap; gap: 10px;
   }
-  .prod-toolbar-info { font-size: 12px; color: var(--text3); }
+  .prod-busca-input {
+    background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius-sm);
+    padding: 7px 12px; color: var(--text); font-size: 12px; font-family: var(--font-data);
+    min-width: 240px;
+  }
+  .prod-busca-input:focus { outline: none; border-color: var(--accent); }
+  .prod-busca-input::placeholder { color: var(--text3); }
   .prod-toolbar-controls { display: flex; align-items: center; gap: 8px; }
+  .prod-toolbar-info { font-size: 12px; color: var(--text3); }
   .prod-toolbar-controls label { font-size: 12px; color: var(--text2); }
   .prod-toolbar-controls select {
     background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius-sm);
     padding: 5px 8px; color: var(--text); font-size: 12px; font-family: var(--font-data);
   }
-  .prod-filtro-row td { padding: 4px 8px 10px; border-bottom: 1px solid var(--border2); }
-  .prod-filtro-input {
-    width: 100%; background: var(--surface2); border: 1px solid var(--border2); border-radius: 6px;
-    padding: 5px 7px; color: var(--text); font-size: 11px; font-family: var(--font-data);
-    box-sizing: border-box;
-  }
-  .prod-filtro-input:focus { outline: none; border-color: var(--accent); }
-  .prod-filtro-input::placeholder { color: var(--text3); }
+  .prod-th-sortable { cursor: pointer; user-select: none; transition: color 0.15s; }
+  .prod-th-sortable:hover { color: var(--text); }
+  .prod-th-sortable.ativa { color: var(--accent); }
   .forn-total .forn-nome { font-weight: 700; color: var(--text); }
   .forn-total .forn-valor { font-weight: 700; color: var(--text); font-size: 14px; }
 
@@ -1601,81 +1603,112 @@ function renderProdutos() {
   renderTabelaProdutos();
 }
 
-// ── FILTROS DA TABELA DE PRODUTOS ────────────────────────
+// ── FILTRO E ORDENAÇÃO DA TABELA DE PRODUTOS ─────────────
 const COLUNAS_PRODUTOS = [
-  { chave: 'nome',              label: 'Produto',              tipo: 'texto' },
-  { chave: 'estoque',           label: 'Estoque',               tipo: 'numero' },
-  { chave: 'precoVenda',        label: 'Preço Venda',           tipo: 'numero' },
-  { chave: 'precoCusto',        label: 'Preço Custo',           tipo: 'numero' },
-  { chave: 'lucroUnitario',     label: 'Lucro Unit.',           tipo: 'numero' },
-  { chave: 'margem',            label: 'Margem %',              tipo: 'numero', percentual: true },
-  { chave: 'valorEstoqueVenda', label: 'Valor Estoque (Venda)', tipo: 'numero' },
-  { chave: 'valorEstoqueCusto', label: 'Valor Estoque (Custo)', tipo: 'numero' },
-  { chave: 'lucroPotencialEstoque', label: 'Lucro Potencial',   tipo: 'numero' },
+  { chave: 'nome',                  label: 'Produto' },
+  { chave: 'estoque',               label: 'Estoque' },
+  { chave: 'precoVenda',            label: 'Preço Venda' },
+  { chave: 'precoCusto',            label: 'Preço Custo' },
+  { chave: 'lucroUnitario',         label: 'Lucro Unit.' },
+  { chave: 'margem',                label: 'Margem %' },
+  { chave: 'valorEstoqueVenda',     label: 'Valor Estoque (Venda)' },
+  { chave: 'valorEstoqueCusto',     label: 'Valor Estoque (Custo)' },
+  { chave: 'lucroPotencialEstoque', label: 'Lucro Potencial' },
 ];
 
-let filtrosProdutos = {}; // { chave: { busca?, min?, max? } }
+let buscaProdutos = '';
+let ordemProdutos = { coluna: 'lucroUnitario', direcao: 'desc' };
 let limiteProdutos = 50;
 
-function aplicarFiltrosProdutos_() {
-  return produtosCompletos.filter(p => {
-    for (const col of COLUNAS_PRODUTOS) {
-      const f = filtrosProdutos[col.chave];
-      if (!f) continue;
-      if (col.tipo === 'texto' && f.busca) {
-        if (!p[col.chave].toLowerCase().includes(f.busca.toLowerCase())) return false;
-      }
-      if (col.tipo === 'numero') {
-        const valor = col.percentual ? p[col.chave] * 100 : p[col.chave];
-        if (f.min !== undefined && f.min !== '' && valor < parseFloat(f.min)) return false;
-        if (f.max !== undefined && f.max !== '' && valor > parseFloat(f.max)) return false;
-      }
-    }
-    return true;
-  });
+function ordenarClicou(coluna) {
+  if (ordemProdutos.coluna === coluna) {
+    ordemProdutos.direcao = ordemProdutos.direcao === 'desc' ? 'asc' : 'desc';
+  } else {
+    ordemProdutos = { coluna, direcao: coluna === 'nome' ? 'asc' : 'desc' };
+  }
+  renderCabecalhoProdutos_();
+  atualizarLinhasProdutos_();
 }
 
-function onFiltroProdutoChange(chave, tipoValor, valor) {
-  if (!filtrosProdutos[chave]) filtrosProdutos[chave] = {};
-  filtrosProdutos[chave][tipoValor] = valor;
-  renderTabelaProdutos();
+function onBuscaProdutoInput(valor) {
+  buscaProdutos = valor;
+  atualizarLinhasProdutos_();
 }
 
 function onLimiteProdutosChange(valor) {
   limiteProdutos = valor === 'todos' ? Infinity : parseInt(valor, 10);
-  renderTabelaProdutos();
+  atualizarLinhasProdutos_();
 }
 
 function limparFiltrosProdutos() {
-  filtrosProdutos = {};
-  document.querySelectorAll('.prod-filtro-input').forEach(el => el.value = '');
-  renderTabelaProdutos();
+  buscaProdutos = '';
+  const busca = document.getElementById('prod-busca-input');
+  if (busca) busca.value = '';
+  ordemProdutos = { coluna: 'lucroUnitario', direcao: 'desc' };
+  renderCabecalhoProdutos_();
+  atualizarLinhasProdutos_();
+}
+
+function produtosFiltradosOrdenados_() {
+  let lista = produtosCompletos;
+  if (buscaProdutos.trim()) {
+    const alvo = buscaProdutos.trim().toLowerCase();
+    lista = lista.filter(p => p.nome.toLowerCase().includes(alvo));
+  }
+  const { coluna, direcao } = ordemProdutos;
+  const mult = direcao === 'asc' ? 1 : -1;
+  lista = [...lista].sort((a, b) => {
+    if (coluna === 'nome') return a.nome.localeCompare(b.nome) * mult;
+    return (a[coluna] - b[coluna]) * mult;
+  });
+  return lista;
+}
+
+function renderCabecalhoProdutos_() {
+  const thead = document.getElementById('prod-thead-row');
+  if (!thead) return;
+  thead.innerHTML = COLUNAS_PRODUTOS.map(col => {
+    const ativa = ordemProdutos.coluna === col.chave;
+    const seta = ativa ? (ordemProdutos.direcao === 'asc' ? ' ▲' : ' ▼') : '';
+    return `<th class="prod-th-sortable ${ativa ? 'ativa' : ''}" onclick="ordenarClicou('${col.chave}')">${col.label}${seta}</th>`;
+  }).join('');
+}
+
+function atualizarLinhasProdutos_() {
+  const tbody = document.getElementById('prod-tbody');
+  const info = document.getElementById('prod-toolbar-info');
+  if (!tbody) return;
+
+  const filtrados = produtosFiltradosOrdenados_();
+  const limitados = filtrados.slice(0, limiteProdutos);
+
+  if (info) info.textContent = `${fmtN(filtrados.length)} de ${fmtN(produtosCompletos.length)} produtos${filtrados.length !== produtosCompletos.length ? ' (filtrado)' : ''}`;
+
+  tbody.innerHTML = limitados.map((p,i) => `
+    <tr>
+      <td><div class="prod-nome"><span class="prod-rank">${i+1}º</span>${p.nome}${p.custoEstimado ? '<span class="prod-estimado" title="Custo estimado (Bling não tinha preço de custo cadastrado): Preço ÷ 2,025">⚠</span>' : ''}</div></td>
+      <td>${fmtN(p.estoque)}</td>
+      <td>${fmt(p.precoVenda)}</td>
+      <td style="color:var(--amber)">${fmt(p.precoCusto)}</td>
+      <td style="color:${p.lucroUnitario>=0?'var(--green)':'var(--red)'};font-weight:600">${fmt(p.lucroUnitario)}</td>
+      <td>${fmtPct(p.margem)}</td>
+      <td>${fmt(p.valorEstoqueVenda)}</td>
+      <td style="color:var(--amber)">${fmt(p.valorEstoqueCusto)}</td>
+      <td style="color:${p.lucroPotencialEstoque>=0?'var(--green)':'var(--red)'}">${fmt(p.lucroPotencialEstoque)}</td>
+    </tr>`).join('') || '<tr><td colspan="9"><div class="empty">Nenhum produto bate com a busca.</div></td></tr>';
 }
 
 function renderTabelaProdutos() {
   const el = document.getElementById('tabela-produtos');
   if (!produtosCompletos.length) { el.innerHTML = ''; return; }
 
-  const filtrados = aplicarFiltrosProdutos_();
-  const limitados = filtrados.slice(0, limiteProdutos);
-
-  const linhaFiltros = `
-    <tr class="prod-filtro-row">
-      <td><input class="prod-filtro-input" type="text" placeholder="Buscar…" oninput="onFiltroProdutoChange('nome','busca',this.value)"></td>
-      <td><input class="prod-filtro-input" type="number" placeholder="mín" oninput="onFiltroProdutoChange('estoque','min',this.value)"></td>
-      <td><input class="prod-filtro-input" type="number" placeholder="mín" oninput="onFiltroProdutoChange('precoVenda','min',this.value)"></td>
-      <td><input class="prod-filtro-input" type="number" placeholder="mín" oninput="onFiltroProdutoChange('precoCusto','min',this.value)"></td>
-      <td><input class="prod-filtro-input" type="number" placeholder="mín" oninput="onFiltroProdutoChange('lucroUnitario','min',this.value)"></td>
-      <td><input class="prod-filtro-input" type="number" placeholder="mín %" oninput="onFiltroProdutoChange('margem','min',this.value)"></td>
-      <td><input class="prod-filtro-input" type="number" placeholder="mín" oninput="onFiltroProdutoChange('valorEstoqueVenda','min',this.value)"></td>
-      <td><input class="prod-filtro-input" type="number" placeholder="mín" oninput="onFiltroProdutoChange('valorEstoqueCusto','min',this.value)"></td>
-      <td><input class="prod-filtro-input" type="number" placeholder="mín" oninput="onFiltroProdutoChange('lucroPotencialEstoque','min',this.value)"></td>
-    </tr>`;
-
+  // Monta a estrutura fixa (toolbar + tabela) apenas uma vez por chamada de renderProdutos —
+  // a busca, ordenação e limite depois só atualizam thead/tbody, sem recriar o input de busca.
   el.innerHTML = `
     <div class="prod-toolbar">
-      <div class="prod-toolbar-info">${fmtN(filtrados.length)} de ${fmtN(produtosCompletos.length)} produtos ${filtrados.length !== produtosCompletos.length ? '(filtrado)' : ''}</div>
+      <input id="prod-busca-input" class="prod-busca-input" type="text" placeholder="Buscar produto pelo nome…" oninput="onBuscaProdutoInput(this.value)">
       <div class="prod-toolbar-controls">
+        <span class="prod-toolbar-info" id="prod-toolbar-info"></span>
         <label>Mostrar:</label>
         <select onchange="onLimiteProdutosChange(this.value)">
           <option value="10">10</option>
@@ -1684,32 +1717,16 @@ function renderTabelaProdutos() {
           <option value="100">100</option>
           <option value="todos">Todos</option>
         </select>
-        <button class="btn-secondary" style="width:auto;padding:6px 12px" onclick="limparFiltrosProdutos()">Limpar filtros</button>
+        <button class="btn-secondary" style="width:auto;padding:6px 12px" onclick="limparFiltrosProdutos()">Limpar</button>
       </div>
     </div>
     <table class="prod-table">
-      <thead><tr>
-        <th>Produto</th><th>Estoque</th><th>Preço Venda</th><th>Preço Custo</th><th>Lucro Unit.</th><th>Margem %</th><th>Valor Estoque (Venda)</th><th>Valor Estoque (Custo)</th><th>Lucro Potencial</th>
-      </tr>
-      ${linhaFiltros}
-      </thead>
-      <tbody>
-        ${limitados.map((p,i) => `
-          <tr>
-            <td><div class="prod-nome"><span class="prod-rank">${i+1}º</span>${p.nome}${p.custoEstimado ? '<span class="prod-estimado" title="Custo estimado (Bling não tinha preço de custo cadastrado): Preço ÷ 2,025">⚠</span>' : ''}</div></td>
-            <td>${fmtN(p.estoque)}</td>
-            <td>${fmt(p.precoVenda)}</td>
-            <td style="color:var(--amber)">${fmt(p.precoCusto)}</td>
-            <td style="color:${p.lucroUnitario>=0?'var(--green)':'var(--red)'};font-weight:600">${fmt(p.lucroUnitario)}</td>
-            <td>${fmtPct(p.margem)}</td>
-            <td>${fmt(p.valorEstoqueVenda)}</td>
-            <td style="color:var(--amber)">${fmt(p.valorEstoqueCusto)}</td>
-            <td style="color:${p.lucroPotencialEstoque>=0?'var(--green)':'var(--red)'}">${fmt(p.lucroPotencialEstoque)}</td>
-          </tr>`).join('')}
-      </tbody>
+      <thead><tr id="prod-thead-row"></tr></thead>
+      <tbody id="prod-tbody"></tbody>
     </table>
-    ${!limitados.length ? '<div class="empty">Nenhum produto bate com os filtros aplicados.</div>' : ''}
   `;
+  renderCabecalhoProdutos_();
+  atualizarLinhasProdutos_();
 }
 
 function renderGrupoFilter() {
