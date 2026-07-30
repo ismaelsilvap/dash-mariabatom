@@ -285,6 +285,27 @@
     font-size: 10px; color: var(--amber); cursor: help; flex-shrink: 0;
   }
   .prod-rank { color: var(--text3); font-size: 11px; font-weight: 700; width: 22px; display: inline-block; }
+
+  /* TOOLBAR E FILTROS DA TABELA DE PRODUTOS */
+  .prod-toolbar {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 12px; flex-wrap: wrap; gap: 10px;
+  }
+  .prod-toolbar-info { font-size: 12px; color: var(--text3); }
+  .prod-toolbar-controls { display: flex; align-items: center; gap: 8px; }
+  .prod-toolbar-controls label { font-size: 12px; color: var(--text2); }
+  .prod-toolbar-controls select {
+    background: var(--surface2); border: 1px solid var(--border2); border-radius: var(--radius-sm);
+    padding: 5px 8px; color: var(--text); font-size: 12px; font-family: var(--font-data);
+  }
+  .prod-filtro-row td { padding: 4px 8px 10px; border-bottom: 1px solid var(--border2); }
+  .prod-filtro-input {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border2); border-radius: 6px;
+    padding: 5px 7px; color: var(--text); font-size: 11px; font-family: var(--font-data);
+    box-sizing: border-box;
+  }
+  .prod-filtro-input:focus { outline: none; border-color: var(--accent); }
+  .prod-filtro-input::placeholder { color: var(--text3); }
   .forn-total .forn-nome { font-weight: 700; color: var(--text); }
   .forn-total .forn-valor { font-weight: 700; color: var(--text); font-size: 14px; }
 
@@ -1515,8 +1536,11 @@ function normalizarProdutoCatalogo(row) {
   };
 }
 
+let produtosCompletos = []; // cache do catálogo ordenado, usado pela tabela filtrada
+
 function renderProdutos() {
   const produtos = [...allProdutosCatalogo].sort((a, b) => b.lucroUnitario - a.lucroUnitario);
+  produtosCompletos = produtos;
 
   if (!produtos.length) {
     document.getElementById('produtos-kpi-grid').innerHTML = '<div class="empty" style="grid-column:1/-1">Suba o relatório de Produtos (catálogo) na aba Configurações.</div>';
@@ -1574,13 +1598,103 @@ function renderProdutos() {
     }
   });
 
-  document.getElementById('tabela-produtos').innerHTML = `
+  renderTabelaProdutos();
+}
+
+// ── FILTROS DA TABELA DE PRODUTOS ────────────────────────
+const COLUNAS_PRODUTOS = [
+  { chave: 'nome',              label: 'Produto',              tipo: 'texto' },
+  { chave: 'estoque',           label: 'Estoque',               tipo: 'numero' },
+  { chave: 'precoVenda',        label: 'Preço Venda',           tipo: 'numero' },
+  { chave: 'precoCusto',        label: 'Preço Custo',           tipo: 'numero' },
+  { chave: 'lucroUnitario',     label: 'Lucro Unit.',           tipo: 'numero' },
+  { chave: 'margem',            label: 'Margem %',              tipo: 'numero', percentual: true },
+  { chave: 'valorEstoqueVenda', label: 'Valor Estoque (Venda)', tipo: 'numero' },
+  { chave: 'valorEstoqueCusto', label: 'Valor Estoque (Custo)', tipo: 'numero' },
+  { chave: 'lucroPotencialEstoque', label: 'Lucro Potencial',   tipo: 'numero' },
+];
+
+let filtrosProdutos = {}; // { chave: { busca?, min?, max? } }
+let limiteProdutos = 50;
+
+function aplicarFiltrosProdutos_() {
+  return produtosCompletos.filter(p => {
+    for (const col of COLUNAS_PRODUTOS) {
+      const f = filtrosProdutos[col.chave];
+      if (!f) continue;
+      if (col.tipo === 'texto' && f.busca) {
+        if (!p[col.chave].toLowerCase().includes(f.busca.toLowerCase())) return false;
+      }
+      if (col.tipo === 'numero') {
+        const valor = col.percentual ? p[col.chave] * 100 : p[col.chave];
+        if (f.min !== undefined && f.min !== '' && valor < parseFloat(f.min)) return false;
+        if (f.max !== undefined && f.max !== '' && valor > parseFloat(f.max)) return false;
+      }
+    }
+    return true;
+  });
+}
+
+function onFiltroProdutoChange(chave, tipoValor, valor) {
+  if (!filtrosProdutos[chave]) filtrosProdutos[chave] = {};
+  filtrosProdutos[chave][tipoValor] = valor;
+  renderTabelaProdutos();
+}
+
+function onLimiteProdutosChange(valor) {
+  limiteProdutos = valor === 'todos' ? Infinity : parseInt(valor, 10);
+  renderTabelaProdutos();
+}
+
+function limparFiltrosProdutos() {
+  filtrosProdutos = {};
+  document.querySelectorAll('.prod-filtro-input').forEach(el => el.value = '');
+  renderTabelaProdutos();
+}
+
+function renderTabelaProdutos() {
+  const el = document.getElementById('tabela-produtos');
+  if (!produtosCompletos.length) { el.innerHTML = ''; return; }
+
+  const filtrados = aplicarFiltrosProdutos_();
+  const limitados = filtrados.slice(0, limiteProdutos);
+
+  const linhaFiltros = `
+    <tr class="prod-filtro-row">
+      <td><input class="prod-filtro-input" type="text" placeholder="Buscar…" oninput="onFiltroProdutoChange('nome','busca',this.value)"></td>
+      <td><input class="prod-filtro-input" type="number" placeholder="mín" oninput="onFiltroProdutoChange('estoque','min',this.value)"></td>
+      <td><input class="prod-filtro-input" type="number" placeholder="mín" oninput="onFiltroProdutoChange('precoVenda','min',this.value)"></td>
+      <td><input class="prod-filtro-input" type="number" placeholder="mín" oninput="onFiltroProdutoChange('precoCusto','min',this.value)"></td>
+      <td><input class="prod-filtro-input" type="number" placeholder="mín" oninput="onFiltroProdutoChange('lucroUnitario','min',this.value)"></td>
+      <td><input class="prod-filtro-input" type="number" placeholder="mín %" oninput="onFiltroProdutoChange('margem','min',this.value)"></td>
+      <td><input class="prod-filtro-input" type="number" placeholder="mín" oninput="onFiltroProdutoChange('valorEstoqueVenda','min',this.value)"></td>
+      <td><input class="prod-filtro-input" type="number" placeholder="mín" oninput="onFiltroProdutoChange('valorEstoqueCusto','min',this.value)"></td>
+      <td><input class="prod-filtro-input" type="number" placeholder="mín" oninput="onFiltroProdutoChange('lucroPotencialEstoque','min',this.value)"></td>
+    </tr>`;
+
+  el.innerHTML = `
+    <div class="prod-toolbar">
+      <div class="prod-toolbar-info">${fmtN(filtrados.length)} de ${fmtN(produtosCompletos.length)} produtos ${filtrados.length !== produtosCompletos.length ? '(filtrado)' : ''}</div>
+      <div class="prod-toolbar-controls">
+        <label>Mostrar:</label>
+        <select onchange="onLimiteProdutosChange(this.value)">
+          <option value="10">10</option>
+          <option value="25">25</option>
+          <option value="50" selected>50</option>
+          <option value="100">100</option>
+          <option value="todos">Todos</option>
+        </select>
+        <button class="btn-secondary" style="width:auto;padding:6px 12px" onclick="limparFiltrosProdutos()">Limpar filtros</button>
+      </div>
+    </div>
     <table class="prod-table">
       <thead><tr>
         <th>Produto</th><th>Estoque</th><th>Preço Venda</th><th>Preço Custo</th><th>Lucro Unit.</th><th>Margem %</th><th>Valor Estoque (Venda)</th><th>Valor Estoque (Custo)</th><th>Lucro Potencial</th>
-      </tr></thead>
+      </tr>
+      ${linhaFiltros}
+      </thead>
       <tbody>
-        ${produtos.map((p,i) => `
+        ${limitados.map((p,i) => `
           <tr>
             <td><div class="prod-nome"><span class="prod-rank">${i+1}º</span>${p.nome}${p.custoEstimado ? '<span class="prod-estimado" title="Custo estimado (Bling não tinha preço de custo cadastrado): Preço ÷ 2,025">⚠</span>' : ''}</div></td>
             <td>${fmtN(p.estoque)}</td>
@@ -1593,7 +1707,9 @@ function renderProdutos() {
             <td style="color:${p.lucroPotencialEstoque>=0?'var(--green)':'var(--red)'}">${fmt(p.lucroPotencialEstoque)}</td>
           </tr>`).join('')}
       </tbody>
-    </table>`;
+    </table>
+    ${!limitados.length ? '<div class="empty">Nenhum produto bate com os filtros aplicados.</div>' : ''}
+  `;
 }
 
 function renderGrupoFilter() {
