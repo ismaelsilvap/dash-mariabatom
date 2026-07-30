@@ -559,7 +559,7 @@
         <div class="card-header">
           <div>
             <div class="card-title">Ranking Completo de Produtos</div>
-            <div class="card-sub">Ordenado por lucro unitário — ⚠ custo estimado (sem preço de custo no Bling) · ⏸ produto inativo</div>
+            <div class="card-sub">Ordenado por lucro unitário — ⚠ custo estimado (sem preço de custo no Bling)</div>
           </div>
         </div>
         <div id="tabela-produtos"><div class="loading"><div class="spinner"></div></div></div>
@@ -1474,9 +1474,9 @@ function renderRankingDespesas() {
 // ── PÁGINA DE PRODUTOS — usa o CATÁLOGO cadastrado (não as vendas) ──────
 let chartTopProdutos = null;
 
-// Busca um valor no objeto row tentando várias chaves possíveis, ignorando espaços/tabs
-// extras e maiúsculas/minúsculas — comum em cabeçalhos vindos de planilhas Google ou
-// exportações do Bling que carregam caracteres invisíveis.
+// Busca um valor no objeto row tentando várias grafias da mesma coluna, ignorando
+// espaços/tabs extras e maiúsculas/minúsculas — comum em cabeçalhos vindos de
+// planilhas Google ou exportações do Bling que carregam caracteres invisíveis.
 function campo_(row, ...nomes) {
   const chaves = Object.keys(row);
   for (const nome of nomes) {
@@ -1489,20 +1489,18 @@ function campo_(row, ...nomes) {
   return undefined;
 }
 
+// Formato ÚNICO suportado do relatório de Produtos (catálogo) do Bling:
+// Código (SKU) | Nome Produto | Preço venda | Preço de custo | Estoque disponível | Marca | Fornecedor
 function normalizarProdutoCatalogo(row) {
-  // Aceita tanto o formato novo do relatório quanto o antigo (fallback), com busca
-  // tolerante a espaços/maiúsculas nos cabeçalhos.
-  const precoVenda     = parseNumBR(campo_(row, 'Preço venda', 'Preço'));
-  const precoCustoRaw  = parseNumBR(campo_(row, 'Preço de custo'));
-  const estoque        = parseNumBR(campo_(row, 'Estoque disponível', 'Estoque'));
+  const precoVenda    = parseNumBR(campo_(row, 'Preço venda'));
+  const precoCustoRaw = parseNumBR(campo_(row, 'Preço de custo'));
+  const estoque       = parseNumBR(campo_(row, 'Estoque disponível'));
   const custoEstimado = (!precoCustoRaw || precoCustoRaw === 0);
   const precoCusto = custoEstimado ? (precoVenda / 2.025) : precoCustoRaw;
   const lucroUnitario = precoVenda - precoCusto;
   return {
-    sku:        String(campo_(row, 'Código (SKU)', 'Código') || '').trim(),
-    nome:       String(campo_(row, 'Nome Produto', 'Descrição') || '').trim(),
-    situacao:   String(campo_(row, 'Situação') || '').trim(),
-    categoria:  String(campo_(row, 'Categoria do produto') || '').trim(),
+    sku:        String(campo_(row, 'Código (SKU)') || '').trim(),
+    nome:       String(campo_(row, 'Nome Produto') || '').trim(),
     fornecedor: String(campo_(row, 'Fornecedor') || '').trim(),
     marca:      String(campo_(row, 'Marca') || '').trim(),
     estoque:    estoque,
@@ -1526,9 +1524,8 @@ function renderProdutos() {
     return;
   }
 
-  const ativos = produtos.filter(p => p.situacao.toLowerCase() === 'ativo');
-  const base = (ativos.length ? ativos : produtos).filter(p => !p.custoEstimado);
-  const baseFallback = base.length ? base : (ativos.length ? ativos : produtos);
+  const base = produtos.filter(p => !p.custoEstimado);
+  const baseFallback = base.length ? base : produtos;
   const maisLucrativo = [...baseFallback].sort((a,b) => b.lucroUnitario - a.lucroUnitario)[0];
   const maiorMargem = [...baseFallback].filter(p => p.precoVenda > 0).sort((a,b) => b.margem - a.margem)[0];
   const lucroPotencialTotal = produtos.reduce((s,p) => s + p.lucroPotencialEstoque, 0);
@@ -1585,7 +1582,7 @@ function renderProdutos() {
       <tbody>
         ${produtos.map((p,i) => `
           <tr>
-            <td><div class="prod-nome"><span class="prod-rank">${i+1}º</span>${p.nome}${p.custoEstimado ? '<span class="prod-estimado" title="Custo estimado (Bling não tinha preço de custo cadastrado): Preço ÷ 2,025">⚠</span>' : ''}${p.situacao && p.situacao.toLowerCase() !== 'ativo' ? '<span class="prod-estimado" title="Situação: ' + p.situacao + '">⏸</span>' : ''}</div></td>
+            <td><div class="prod-nome"><span class="prod-rank">${i+1}º</span>${p.nome}${p.custoEstimado ? '<span class="prod-estimado" title="Custo estimado (Bling não tinha preço de custo cadastrado): Preço ÷ 2,025">⚠</span>' : ''}</div></td>
             <td>${fmtN(p.estoque)}</td>
             <td>${fmt(p.precoVenda)}</td>
             <td style="color:var(--amber)">${fmt(p.precoCusto)}</td>
