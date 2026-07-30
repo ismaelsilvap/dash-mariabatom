@@ -1034,7 +1034,7 @@ async function handleUpload(file, tipo) {
       // Catálogo é sempre substituído por inteiro (é uma foto do cadastro atual, não um log de transações)
       const novosProdutos = rows.map(normalizarProdutoCatalogo).filter(r => r.sku || r.nome);
       const mapaSku = {};
-      novosProdutos.forEach(p => { mapaSku[p.sku || p.nome] = p; });
+      novosProdutos.forEach((p, idx) => { mapaSku[p.sku || (p.nome + '__' + idx)] = p; });
       allProdutosCatalogo = Object.values(mapaSku);
       localStorage.setItem('dash_produtos_v1', JSON.stringify(allProdutosCatalogo));
     }
@@ -1474,21 +1474,37 @@ function renderRankingDespesas() {
 // ── PÁGINA DE PRODUTOS — usa o CATÁLOGO cadastrado (não as vendas) ──────
 let chartTopProdutos = null;
 
+// Busca um valor no objeto row tentando várias chaves possíveis, ignorando espaços/tabs
+// extras e maiúsculas/minúsculas — comum em cabeçalhos vindos de planilhas Google ou
+// exportações do Bling que carregam caracteres invisíveis.
+function campo_(row, ...nomes) {
+  const chaves = Object.keys(row);
+  for (const nome of nomes) {
+    const alvo = nome.trim().toLowerCase();
+    const achada = chaves.find(k => k.trim().toLowerCase() === alvo);
+    if (achada !== undefined && row[achada] !== '' && row[achada] !== undefined && row[achada] !== null) {
+      return row[achada];
+    }
+  }
+  return undefined;
+}
+
 function normalizarProdutoCatalogo(row) {
-  // Aceita tanto o formato novo do relatório quanto o antigo (fallback com ||)
-  const precoVenda    = parseNumBR(row['Preço venda'] ?? row['Preço']);
-  const precoCustoRaw = parseNumBR(row['Preço de custo']);
-  const estoque        = parseNumBR(row['Estoque disponível'] ?? row['Estoque']);
+  // Aceita tanto o formato novo do relatório quanto o antigo (fallback), com busca
+  // tolerante a espaços/maiúsculas nos cabeçalhos.
+  const precoVenda     = parseNumBR(campo_(row, 'Preço venda', 'Preço'));
+  const precoCustoRaw  = parseNumBR(campo_(row, 'Preço de custo'));
+  const estoque        = parseNumBR(campo_(row, 'Estoque disponível', 'Estoque'));
   const custoEstimado = (!precoCustoRaw || precoCustoRaw === 0);
   const precoCusto = custoEstimado ? (precoVenda / 2.025) : precoCustoRaw;
   const lucroUnitario = precoVenda - precoCusto;
   return {
-    sku:        String(row['Código (SKU)'] ?? row['Código'] ?? '').trim(),
-    nome:       String(row['Nome Produto'] ?? row['Descrição'] ?? '').trim(),
-    situacao:   String(row['Situação'] || '').trim(), // pode não existir no relatório novo — fica vazio
-    categoria:  String(row['Categoria do produto'] || '').trim(), // idem
-    fornecedor: String(row['Fornecedor'] || '').trim(),
-    marca:      String(row['Marca'] || '').trim(),
+    sku:        String(campo_(row, 'Código (SKU)', 'Código') || '').trim(),
+    nome:       String(campo_(row, 'Nome Produto', 'Descrição') || '').trim(),
+    situacao:   String(campo_(row, 'Situação') || '').trim(),
+    categoria:  String(campo_(row, 'Categoria do produto') || '').trim(),
+    fornecedor: String(campo_(row, 'Fornecedor') || '').trim(),
+    marca:      String(campo_(row, 'Marca') || '').trim(),
     estoque:    estoque,
     precoVenda: precoVenda,
     precoCusto: precoCusto,
@@ -1804,7 +1820,7 @@ async function atualizarDoDrive() {
       if (rowsProdutos.length) {
         const novosProdutos = rowsProdutos.map(normalizarProdutoCatalogo).filter(r => r.sku || r.nome);
         const mapaSku = {};
-        novosProdutos.forEach(p => { mapaSku[p.sku || p.nome] = p; });
+        novosProdutos.forEach((p, idx) => { mapaSku[p.sku || (p.nome + '__' + idx)] = p; });
         allProdutosCatalogo = Object.values(mapaSku);
         localStorage.setItem('dash_produtos_v1', JSON.stringify(allProdutosCatalogo));
       }
