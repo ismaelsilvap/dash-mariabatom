@@ -163,6 +163,7 @@
 
   /* KPI GRID */
   .kpi-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; }
+  #kpi-grid { grid-template-columns: repeat(6, 1fr); }
   .kpi-card {
     background: var(--surface);
     border: 1px solid var(--border);
@@ -1163,6 +1164,11 @@ function renderDashboard() {
     .filter(c => c.grupo === 'Despesas Fixas' && !isCancelado_(c.situacao))
     .reduce((s,c) => s + c.valor, 0);
 
+  const contasPeriodo = filtrarContasPorPeriodo(allContas)
+    .filter(c => !isCancelado_(c.situacao) && c.grupo !== 'Transferências')
+    .reduce((s,c) => s + c.valor, 0);
+  const saldoFatContas = faturamento - contasPeriodo; // Faturamento − Contas a Pagar (por vencimento)
+
   const lucroLiquido  = lucroBruto - totalTaxas - despesasFixas; // Lucro Bruto − Impostos/Taxas − Despesas Fixas
   const pedidos       = new Set(dados.map(r => r.numeroPedido)).size;
 
@@ -1172,6 +1178,7 @@ function renderDashboard() {
     { label:'Custo Total',                    value: fmt(custoTotal),   sub: `Custo produtos ${fmt(custoProdutos)} + taxas ${fmt(totalTaxas)}`, color:'var(--amber)' },
     { label:'Lucro Bruto',                    value: fmt(lucroBruto),   sub: 'Faturamento − Preço de Custo', color: lucroBruto >= 0 ? 'var(--green)' : 'var(--red)' },
     { label:'Lucro Líquido',                  value: fmt(lucroLiquido), sub: `− Taxas ${fmt(totalTaxas)} − Desp. Fixas ${fmt(despesasFixas)}`, color: lucroLiquido >= 0 ? 'var(--green)' : 'var(--red)' },
+    { label:'Faturado − Contas a Pagar',      value: fmt(saldoFatContas), sub: `Fat. ${fmt(faturamento)} − Contas ${fmt(contasPeriodo)} (sem transferências)`, color: saldoFatContas >= 0 ? 'var(--green)' : 'var(--red)' },
   ];
 
   document.getElementById('kpi-grid').innerHTML = kpis.map(k => `
