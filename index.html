@@ -398,8 +398,8 @@
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z"/><circle cx="7" cy="7" r="1.5"/></svg>
         Produtos
       </button>
-      <span class="nav-section">Configuração</span>
-      <button class="nav-item" onclick="showPage('config')">
+      <span class="nav-section" id="nav-config-label">Configuração</span>
+      <button class="nav-item" id="nav-config-btn" onclick="showPage('config')">
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
         Configurações
       </button>
@@ -600,6 +600,12 @@
             <input class="config-input" id="cfg-drive-url" placeholder="https://script.google.com/macros/s/AKfy.../exec">
           </div>
           <button class="btn-primary" onclick="salvarConfigDrive()">Salvar</button>
+          <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
+            <label>Link para a cliente (já configurado, sem aba Configurações)</label>
+            <input class="config-input" id="cfg-link-cliente" readonly placeholder="Clique em gerar para criar o link">
+            <div style="font-size:12px;color:var(--text3);margin:6px 0 10px">Inclui a URL do Apps Script e as taxas atuais. Ao abrir, o dashboard se atualiza sozinho. Se mudar as taxas, gere o link de novo.</div>
+            <button class="btn-primary" onclick="gerarLinkCliente()">Gerar link da cliente</button>
+          </div>
         </div>
         <div style="margin-top:14px; font-size:12px; color:var(--text3); line-height:1.8">
           <strong style="color:var(--text2)">Como configurar (uma vez só):</strong><br>
@@ -654,7 +660,46 @@
 <script>
 // ── CONFIG ──────────────────────────────────────────────
 const CONFIG_KEY = 'dash_config_v2';
-let cfg = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}');
+let cfg = {};
+try { cfg = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}'); } catch(e) { cfg = {}; }
+
+// ── LINK DO CLIENTE ──────────────────────────────────────
+// Link no formato  .../index.html#c=<base64>  já leva a URL do Apps Script e as taxas.
+// Quem abre o link vê o dashboard pronto, sem a aba Configurações, e os dados se atualizam sozinhos.
+let modoCliente = false;
+(function aplicarLinkCliente_() {
+  try {
+    const m = location.hash.match(/[#&]c=([^&]+)/);
+    if (!m) return;
+    const json = decodeURIComponent(escape(atob(decodeURIComponent(m[1]))));
+    const dados = JSON.parse(json);
+    if (dados && dados.driveUrl) {
+      cfg = { ...cfg, driveUrl: dados.driveUrl, taxas: dados.taxas || cfg.taxas || {}, modoCliente: true };
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+    }
+  } catch(e) { console.warn('Link de cliente inválido:', e.message); }
+  modoCliente = !!cfg.modoCliente;
+})();
+
+function gerarLinkCliente() {
+  const url = (cfg.driveUrl || document.getElementById('cfg-drive-url').value || '').trim();
+  if (!url) { alert('Salve primeiro a URL do Apps Script (bloco acima).'); return; }
+  const payload = { driveUrl: url, taxas: cfg.taxas || {} };
+  const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+  const base = location.href.split('#')[0];
+  const link = base + '#c=' + encodeURIComponent(b64);
+  const inp = document.getElementById('cfg-link-cliente');
+  inp.value = link; inp.select();
+  try { navigator.clipboard.writeText(link); } catch(e) {}
+  const btn = event.target; const orig = btn.textContent;
+  btn.textContent = '✓ Link copiado!'; setTimeout(() => { btn.textContent = orig; }, 2500);
+}
+
+function aplicarModoCliente_() {
+  if (!modoCliente) return;
+  ['nav-config-btn','nav-config-label'].forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
+  
+}
 let allPedidos = [];
 let allContas  = [];
 let allProdutosCatalogo = [];
@@ -714,7 +759,9 @@ function calcularTaxas(canal, valorTotal, quantidade) {
 
 // ── NAVEGAÇÃO ────────────────────────────────────────────
 function showPage(name) {
+  if (modoCliente && name === 'config') name = 'overview';
   ['overview','contas','produtos','config'].forEach(p => {
+    if (!document.getElementById('page-'+p)) return;
     document.getElementById('page-'+p).style.display = p === name ? 'flex' : 'none';
     if (p === name) document.getElementById('page-'+p).style.flexDirection = 'column';
   });
@@ -1929,8 +1976,10 @@ async function fetchAbaDrive_(tipo) {
   return Array.isArray(data) ? data : [];
 }
 
-async function atualizarDoDrive() {
+async function atualizarDoDrive(silencioso) {
+  if (silencioso !== true) silencioso = false;
   if (!cfg.driveUrl) {
+    if (silencioso) return;
     alert('Configure a URL do Apps Script na aba Configurações primeiro.');
     showPage('config');
     return;
@@ -1973,7 +2022,7 @@ async function atualizarDoDrive() {
 
     document.getElementById('last-sync-time').textContent = new Date().toLocaleString('pt-BR', {day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
     atualizarResumoDados();
-    renderTaxasEditor();
+    if (!modoCliente) renderTaxasEditor();
     renderDashboard();
     renderContas();
     renderProdutos();
@@ -1981,7 +2030,8 @@ async function atualizarDoDrive() {
     btn.lastChild.textContent = ' Atualizado!';
     setTimeout(() => { btn.lastChild.textContent = textoOriginal; }, 2000);
   } catch (e) {
-    alert('Erro ao atualizar do Drive: ' + e.message);
+    if (silencioso) { console.warn('Falha na atualização automática:', e.message); document.getElementById('last-sync-time').textContent = 'falhou — tente Atualizar'; }
+    else alert('Erro ao atualizar do Drive: ' + e.message);
     btn.lastChild.textContent = textoOriginal;
   } finally {
     btn.disabled = false;
@@ -2057,17 +2107,21 @@ function salvarTaxas() {
 }
 
 // ── INIT ─────────────────────────────────────────────────
+aplicarModoCliente_();
 carregarInputsConfig();
 inicializarFiltro();
 carregarDadosSalvos();
 if (allPedidos.length || allContas.length) {
   renderDashboard();
   renderContas();
+} else if (modoCliente) {
+  document.getElementById('kpi-grid').innerHTML = '<div class="loading"><div class="spinner"></div> Carregando dados…</div>';
 } else {
   document.getElementById('kpi-grid').innerHTML = '<div class="empty" style="grid-column:1/-1">Suba o relatório de vendas na aba <strong style="color:var(--accent)">Configurações</strong> para começar.</div>';
   showPage('config');
 }
 if (allProdutosCatalogo.length) renderProdutos();
+if (modoCliente) atualizarDoDrive(true);
 </script>
 </body>
 </html>
