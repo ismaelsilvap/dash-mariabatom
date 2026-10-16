@@ -692,9 +692,14 @@ function getTaxas() {
   return cfg.taxas || {};
 }
 
+// Pedidos válidos para cálculo: ignora os com situação "Cancelado(a)"
+function pedidosAtivos_() {
+  return allPedidos.filter(r => !isCancelado_(r.situacao));
+}
+
 // Lista de canais distintos presentes nos dados importados (ordem alfabética)
 function canaisDisponiveis_() {
-  return Array.from(new Set(allPedidos.map(r => r.canal).filter(Boolean))).sort();
+  return Array.from(new Set(pedidosAtivos_().map(r => r.canal).filter(Boolean))).sort();
 }
 
 // Calcula o custo total de taxas de um item de pedido
@@ -1084,10 +1089,11 @@ function fmtDataBR_(iso) {
 function atualizarResumoDados() {
   const el = document.getElementById('data-summary');
   if (!allPedidos.length && !allContas.length && !allProdutosCatalogo.length) { el.innerHTML = ''; return; }
-  const datasV = allPedidos.map(r => r.data).filter(Boolean).sort();
+  const nCancel = allPedidos.length - pedidosAtivos_().length;
+  const datasV = pedidosAtivos_().map(r => r.data).filter(Boolean).sort();
   const datasC = allContas.map(r => r.vencimento).filter(Boolean).sort();
   el.innerHTML = `
-    <div>📦 <strong>${allPedidos.length}</strong> linhas de vendas${datasV.length ? ' · ' + fmtDataBR_(datasV[0]) + ' até ' + fmtDataBR_(datasV[datasV.length-1]) : ''}</div>
+    <div>📦 <strong>${allPedidos.length - nCancel}</strong> linhas de vendas${nCancel ? ' (' + nCancel + ' cancelada(s) ignoradas)' : ''}${datasV.length ? ' · ' + fmtDataBR_(datasV[0]) + ' até ' + fmtDataBR_(datasV[datasV.length-1]) : ''}</div>
     <div>💳 <strong>${allContas.length}</strong> contas a pagar${datasC.length ? ' · vencimentos ' + fmtDataBR_(datasC[0]) + ' até ' + fmtDataBR_(datasC[datasC.length-1]) : ''}</div>
     <div>🏷️ <strong>${allProdutosCatalogo.length}</strong> produtos no catálogo</div>
   `;
@@ -1144,7 +1150,7 @@ const fmtN = v => (v||0).toLocaleString('pt-BR');
 
 // ── RENDER DASHBOARD ─────────────────────────────────────
 function renderDashboard() {
-  const dados = filtrarPorPeriodo(allPedidos);
+  const dados = filtrarPorPeriodo(pedidosAtivos_());
 
   const faturamento   = dados.reduce((s,r) => s + r.valorTotal, 0);
   const quantidade    = dados.reduce((s,r) => s + r.quantidade, 0);
@@ -1831,7 +1837,7 @@ function renderContasLista() {
 function renderLucroMensal() {
   const mapa = {}; // 'YYYY-MM' -> { fat, contas }
 
-  allPedidos.forEach(r => {
+  pedidosAtivos_().forEach(r => {
     const key = (r.data || '').substring(0,7);
     if (!key || key.length !== 7) return;
     if (!mapa[key]) mapa[key] = { fat: 0, contas: 0 };
