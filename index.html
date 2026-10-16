@@ -603,8 +603,9 @@
           <div style="margin-top:18px;padding-top:16px;border-top:1px solid var(--border)">
             <label>Link para a cliente (já configurado, sem aba Configurações)</label>
             <input class="config-input" id="cfg-link-cliente" readonly placeholder="Clique em gerar para criar o link">
-            <div style="font-size:12px;color:var(--text3);margin:6px 0 10px">Inclui a URL do Apps Script e as taxas atuais. Ao abrir, o dashboard se atualiza sozinho. Se mudar as taxas, gere o link de novo.</div>
+            <div style="font-size:12px;color:var(--text3);margin:6px 0 10px">Link curto (termina em #mb). Usa a URL do Apps Script e as taxas embutidas no arquivo; se mudar as taxas, use "Copiar configuração atual" e atualize o arquivo.</div>
             <button class="btn-primary" onclick="gerarLinkCliente()">Gerar link da cliente</button>
+            <button class="btn-primary" style="background:var(--surface2);color:var(--text)" onclick="copiarConfigAtual()">Copiar configuração atual</button>
           </div>
         </div>
         <div style="margin-top:14px; font-size:12px; color:var(--text3); line-height:1.8">
@@ -666,9 +667,19 @@ try { cfg = JSON.parse(localStorage.getItem(CONFIG_KEY) || '{}'); } catch(e) { c
 // ── LINK DO CLIENTE ──────────────────────────────────────
 // Link no formato  .../index.html#c=<base64>  já leva a URL do Apps Script e as taxas.
 // Quem abre o link vê o dashboard pronto, sem a aba Configurações, e os dados se atualizam sozinhos.
+// Configuração embutida da cliente: o link curto  .../#mb  usa estes valores.
+// Para mudar taxas/URL: edite aqui (use o botão "Copiar configuração atual" em Configurações).
+const CLIENTE_PADRAO = {"driveUrl": "https://script.google.com/macros/s/AKfycbw3n8Z7ApUVycEWoH5Y-rx8diec2WEs-NPkW-1aUdmZsQ15cHasAFycCKaNpC42jwAv/exec", "taxas": {"Loja Física": {"percentual": 0, "frete": 0, "imposto": 10, "embalagem": 0, "taxaItem": 0}, "Nummus Cashback": {"percentual": 0, "frete": 0, "imposto": 10, "embalagem": 0, "taxaItem": 0}, "TikTok Shop": {"percentual": 6, "frete": 6, "imposto": 6, "embalagem": 2, "taxaItem": 4}, "Ecommerce (Nuvemshop)": {"percentual": 0, "frete": 0, "imposto": 0, "embalagem": 0, "taxaItem": 0}, "Nuvemshop": {"percentual": 0, "frete": 0, "imposto": 10, "embalagem": 0, "taxaItem": 0}}};
+
 let modoCliente = false;
 (function aplicarLinkCliente_() {
   try {
+    if (/[#&]mb\b/.test(location.hash)) {
+      cfg = { ...cfg, driveUrl: CLIENTE_PADRAO.driveUrl, taxas: CLIENTE_PADRAO.taxas, modoCliente: true };
+      localStorage.setItem(CONFIG_KEY, JSON.stringify(cfg));
+      modoCliente = true;
+      return;
+    }
     const m = location.hash.match(/[#&]c=([^&]+)/);
     if (!m) return;
     const json = decodeURIComponent(escape(atob(decodeURIComponent(m[1]))));
@@ -684,15 +695,23 @@ let modoCliente = false;
 function gerarLinkCliente() {
   const url = (cfg.driveUrl || document.getElementById('cfg-drive-url').value || '').trim();
   if (!url) { alert('Salve primeiro a URL do Apps Script (bloco acima).'); return; }
-  const payload = { driveUrl: url, taxas: cfg.taxas || {} };
-  const b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
   const base = location.href.split('#')[0];
-  const link = base + '#c=' + encodeURIComponent(b64);
+  const link = base + '#mb';
   const inp = document.getElementById('cfg-link-cliente');
   inp.value = link; inp.select();
   try { navigator.clipboard.writeText(link); } catch(e) {}
   const btn = event.target; const orig = btn.textContent;
   btn.textContent = '✓ Link copiado!'; setTimeout(() => { btn.textContent = orig; }, 2500);
+}
+
+function copiarConfigAtual() {
+  const url = (cfg.driveUrl || document.getElementById('cfg-drive-url').value || '').trim();
+  const txt = JSON.stringify({ driveUrl: url, taxas: cfg.taxas || {} });
+  const inp = document.getElementById('cfg-link-cliente');
+  inp.value = txt; inp.select();
+  try { navigator.clipboard.writeText(txt); } catch(e) {}
+  const btn = event.target; const orig = btn.textContent;
+  btn.textContent = '✓ Copiado!'; setTimeout(() => { btn.textContent = orig; }, 2500);
 }
 
 function aplicarModoCliente_() {
